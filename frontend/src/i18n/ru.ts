@@ -45,6 +45,11 @@ const messages: Messages = {
     empty_state: 'Выберите модель и начните чат',
     error: 'Что-то пошло не так. Попробуйте снова.',
     vision_only: 'Загрузка изображений доступна только для моделей с поддержкой зрения',
+    sessions_title: 'Чаты с этой моделью',
+    session_untitled: 'Новый чат',
+    new_session: 'Новый чат',
+    delete_session: 'Удалить чат',
+    chat_create_error: 'Не удалось создать сессию чата.',
   },
   upload: {
     uploading: 'Загрузка...',

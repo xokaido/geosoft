@@ -43,6 +43,11 @@ const messages = {
     empty_state: 'Select a model and start chatting',
     error: 'Something went wrong. Please try again.',
     vision_only: 'Image upload is only available for vision-capable models',
+    sessions_title: 'Chats for this model',
+    session_untitled: 'New chat',
+    new_session: 'New chat',
+    delete_session: 'Delete chat',
+    chat_create_error: 'Could not start a chat session.',
   },
   upload: {
     uploading: 'Uploading...',

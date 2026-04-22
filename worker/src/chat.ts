@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
-import { isChatModel, isVisionModel } from './models'
+import { finalizeExchange, insertUserMessage, verifyChatForUser } from './chats'
+import { getModelMeta, isChatModel, isVisionModel } from './models'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
 
@@ -148,12 +149,62 @@ function transformAiSseToTokenSse(source: ReadableStream<Uint8Array>): ReadableS
   })
 }
 
+async function accumulateWorkersAiText(source: ReadableStream<Uint8Array>): Promise<string> {
+  const dec = new TextDecoder()
+  let lineBuf = ''
+  const prevResponse = { value: '' }
+  let full = ''
+
+  const handleLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return
+    const payload = trimmed.slice(5).trim()
+    if (payload === '[DONE]') return
+    try {
+      const json = JSON.parse(payload) as Record<string, unknown>
+      const piece = extractStreamDelta(json, prevResponse)
+      if (piece) full += piece
+    } catch {
+      // ignore
+    }
+  }
+
+  const appendAndDrain = (chunk: string) => {
+    lineBuf += chunk
+    for (;;) {
+      const i = lineBuf.indexOf('\n')
+      if (i < 0) break
+      let row = lineBuf.slice(0, i)
+      lineBuf = lineBuf.slice(i + 1)
+      if (row.endsWith('\r')) row = row.slice(0, -1)
+      handleLine(row)
+    }
+  }
+
+  const reader = source.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (value) appendAndDrain(dec.decode(value, { stream: true }))
+      if (done) {
+        appendAndDrain(dec.decode())
+        if (lineBuf.trim()) handleLine(lineBuf)
+        break
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return full
+}
+
 export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Response> {
   let body: {
     model?: string
     messages?: ChatMessage[]
     imageUrl?: string
     useRag?: boolean
+    chatId?: string
   }
   try {
     body = await c.req.json()
@@ -162,8 +213,17 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   }
   const model = body.model
   const messages = body.messages
+  const chatId = body.chatId
   if (!model || !isChatModel(model)) {
     return c.json({ error: 'Unsupported model for chat' }, 400)
+  }
+  if (!chatId || typeof chatId !== 'string') {
+    return c.json({ error: 'chatId is required' }, 400)
+  }
+  const userId = c.get('session').username
+  const okChat = await verifyChatForUser(c.env.DB, userId, chatId, model)
+  if (!okChat) {
+    return c.json({ error: 'Chat not found or model does not match this session' }, 404)
   }
   if (!Array.isArray(messages) || !messages.length) {
     return c.json({ error: 'messages required' }, 400)
@@ -212,6 +272,13 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     }
   }
 
+  const last = messages[messages.length - 1]
+  if (!last || last.role !== 'user') {
+    return c.json({ error: 'Last message must be from the user' }, 400)
+  }
+  const userTextForDb =
+    typeof last.content === 'string' ? last.content : lastUserQuery([last])
+
   try {
     const stream = await c.env.AI.run(model, {
       messages: outMessages,
@@ -221,7 +288,36 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     if (!(stream instanceof ReadableStream)) {
       return c.json({ error: 'Streaming not available for this model' }, 500)
     }
-    const out = transformAiSseToTokenSse(stream as ReadableStream<Uint8Array>)
+    const raw = stream as ReadableStream<Uint8Array>
+    const [toClient, toRecorder] = raw.tee()
+    const out = transformAiSseToTokenSse(toClient)
+
+    const userMsgId = crypto.randomUUID()
+    const userNow = Date.now()
+    await insertUserMessage(c.env.DB, chatId, userMsgId, userTextForDb, userNow)
+
+    const meta = getModelMeta(model)
+    const assistantModelName = meta?.name ?? meta?.slug ?? model
+    const assistantMsgId = crypto.randomUUID()
+
+    const persist = accumulateWorkersAiText(toRecorder).then((assistantText) =>
+      finalizeExchange(c.env.DB, {
+        chatId,
+        assistantMessageId: assistantMsgId,
+        assistantContent: assistantText,
+        modelName: assistantModelName,
+        userPreviewForTitle: userTextForDb,
+        now: Date.now(),
+      })
+    )
+
+    const ctx = c.executionCtx
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(persist.catch(() => {}))
+    } else {
+      void persist.catch(() => {})
+    }
+
     return new Response(out, {
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',

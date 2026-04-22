@@ -7,6 +7,12 @@ import {
   signSession,
 } from './auth'
 import { handleChat } from './chat'
+import {
+  handleCreateChat,
+  handleDeleteChat,
+  handleGetChatMessages,
+  handleListChats,
+} from './chats'
 import { MODELS } from './models'
 import { ingestGeosoftToVectorize } from './rag'
 import type { Env } from './types'
@@ -48,6 +54,10 @@ const api = new Hono<{ Bindings: Env }>()
 api.use('*', requireAuth)
 
 api.get('/models', (c) => c.json(MODELS))
+api.get('/chats', (c) => handleListChats(c))
+api.post('/chats', (c) => handleCreateChat(c))
+api.get('/chats/:id/messages', (c) => handleGetChatMessages(c))
+api.delete('/chats/:id', (c) => handleDeleteChat(c))
 api.post('/upload', (c) => handleUpload(c))
 api.get('/image/:key', (c) => handleImage(c))
 api.post('/chat', (c) => handleChat(c))

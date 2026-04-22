@@ -45,6 +45,11 @@ const messages: Messages = {
     empty_state: 'აირჩიეთ მოდელი და დაიწყეთ საუბარი',
     error: 'დაფიქსირდა შეცდომა. სცადეთ თავიდან.',
     vision_only: 'სურათის ატვირთვა ხელმისაწვდოლია მხოლოდ ხედვის მხარდაჭერის მოდელებზე',
+    sessions_title: 'საუბრები ამ მოდელით',
+    session_untitled: 'ახალი საუბარი',
+    new_session: 'ახალი საუბარი',
+    delete_session: 'საუბრის წაშლა',
+    chat_create_error: 'საუბრის სესიის დაწყება ვერ მოხერხდა.',
   },
   upload: {
     uploading: 'იტვირთება...',

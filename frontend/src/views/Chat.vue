@@ -10,7 +10,7 @@ import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const auth = useAuthStore()
 const theme = useThemeStore()
 
@@ -22,6 +22,11 @@ const useRag = ref(false)
 const draft = ref('')
 const imageUrl = ref<string | null>(null)
 const uploadHint = ref('')
+
+type ApiChat = { id: string; modelId: string; title: string; createdAt: number; updatedAt: number }
+const chats = ref<ApiChat[]>([])
+const chatsLoading = ref(false)
+const activeChatId = ref<string | null>(null)
 
 const uiMessages = ref<UiMsg[]>([])
 const thread = ref<{ role: 'user' | 'assistant'; content: string }[]>([])
@@ -35,6 +40,11 @@ const selectedModel = computed(() => models.value.find((m) => m.id === modelId.v
 const vision = computed(
   () => !!selectedModel.value?.vision && !!selectedModel.value?.chatEligible
 )
+
+function formatChatDate(ts: number): string {
+  const loc = locale.value === 'ka' ? 'ka-GE' : locale.value === 'ru' ? 'ru-RU' : 'en-US'
+  return new Date(ts).toLocaleString(loc, { dateStyle: 'short', timeStyle: 'short' })
+}
 
 onMounted(async () => {
   try {
@@ -51,6 +61,137 @@ onMounted(async () => {
     modelsLoading.value = false
   }
 })
+
+watch(
+  [modelId, modelsLoading],
+  async ([id, loading]) => {
+    if (loading || !id) return
+    await hydrateSessionForModel()
+  },
+  { flush: 'post' }
+)
+
+async function loadChats() {
+  if (!modelId.value) return
+  chatsLoading.value = true
+  try {
+    const r = await fetch(`/api/chats?modelId=${encodeURIComponent(modelId.value)}`, {
+      credentials: 'include',
+    })
+    if (!r.ok) {
+      chats.value = []
+      return
+    }
+    const data = (await r.json()) as { chats: ApiChat[] }
+    chats.value = data.chats ?? []
+  } finally {
+    chatsLoading.value = false
+  }
+}
+
+async function loadMessages(chatId: string) {
+  const r = await fetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+    credentials: 'include',
+  })
+  if (!r.ok) return
+  const data = (await r.json()) as {
+    messages: Array<{
+      id: string
+      role: 'user' | 'assistant'
+      content: string
+      modelName?: string | null
+    }>
+  }
+  const list = data.messages ?? []
+  thread.value = list.map((m) => ({ role: m.role, content: m.content }))
+  uiMessages.value = list.map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    modelName: m.modelName ?? undefined,
+  }))
+}
+
+async function hydrateSessionForModel() {
+  if (!modelId.value || modelsLoading.value) return
+  await loadChats()
+  if (chats.value.length === 0) {
+    activeChatId.value = null
+    thread.value = []
+    uiMessages.value = []
+    return
+  }
+  const keep =
+    activeChatId.value !== null && chats.value.some((c) => c.id === activeChatId.value)
+  if (!keep) {
+    activeChatId.value = chats.value[0].id
+  }
+  await loadMessages(activeChatId.value!)
+}
+
+async function ensureActiveChat(): Promise<boolean> {
+  if (activeChatId.value) return true
+  const r = await fetch('/api/chats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ modelId: modelId.value }),
+  })
+  if (!r.ok) return false
+  const j = (await r.json()) as { id: string }
+  activeChatId.value = j.id
+  await loadChats()
+  return true
+}
+
+async function createNewChat() {
+  if (!modelId.value || thinking.value) return
+  const r = await fetch('/api/chats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ modelId: modelId.value }),
+  })
+  if (!r.ok) {
+    uploadHint.value = t('chat.chat_create_error')
+    setTimeout(() => {
+      uploadHint.value = ''
+    }, 4500)
+    return
+  }
+  const j = (await r.json()) as { id: string }
+  activeChatId.value = j.id
+  thread.value = []
+  uiMessages.value = []
+  await loadChats()
+  sidebarOpen.value = false
+}
+
+async function selectChat(id: string) {
+  if (thinking.value || id === activeChatId.value) return
+  activeChatId.value = id
+  await loadMessages(id)
+  sidebarOpen.value = false
+}
+
+async function deleteChatById(id: string) {
+  if (thinking.value) return
+  const r = await fetch(`/api/chats/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  if (!r.ok) return
+  if (activeChatId.value === id) {
+    activeChatId.value = null
+    thread.value = []
+    uiMessages.value = []
+  }
+  await loadChats()
+  if (!activeChatId.value && chats.value.length > 0) {
+    activeChatId.value = chats.value[0].id
+    await loadMessages(activeChatId.value)
+  }
+}
 
 watch(
   () => uiMessages.value.length,
@@ -137,6 +278,13 @@ async function readTokenStream(resp: Response, onToken: (t: string) => void) {
 async function send() {
   const text = draft.value.trim()
   if (!text || !modelId.value) return
+  if (!(await ensureActiveChat())) {
+    uploadHint.value = t('chat.chat_create_error')
+    setTimeout(() => {
+      uploadHint.value = ''
+    }, 4500)
+    return
+  }
 
   const userMsg: UiMsg = {
     id: crypto.randomUUID(),
@@ -155,6 +303,7 @@ async function send() {
 
   const body: Record<string, unknown> = {
     model: modelId.value,
+    chatId: activeChatId.value,
     messages: payloadMessages,
     useRag: useRag.value,
   }
@@ -206,6 +355,7 @@ async function send() {
 
     thread.value.push({ role: 'user', content: text })
     thread.value.push({ role: 'assistant', content: full })
+    void loadChats()
   } catch {
     thinking.value = false
     const idx = uiMessages.value.findIndex((m) => m.id === userMsg.id)
@@ -235,6 +385,46 @@ async function send() {
 
       <div v-if="modelsLoading" class="muted">{{ t('common.loading') }}</div>
       <ModelSelector v-else v-model:model-id="modelId" :models="models" />
+
+      <div v-if="!modelsLoading && modelId" class="sessions">
+        <div class="sessions-head">
+          <span class="sessions-title">{{ t('chat.sessions_title') }}</span>
+          <button
+            type="button"
+            class="ghost sm"
+            :disabled="thinking"
+            :title="t('chat.new_session')"
+            @click="createNewChat"
+          >
+            + {{ t('chat.new_session') }}
+          </button>
+        </div>
+        <div v-if="chatsLoading" class="muted">{{ t('common.loading') }}</div>
+        <div v-else class="session-list">
+          <div
+            v-for="c in chats"
+            :key="c.id"
+            class="session-row"
+            :class="{ active: c.id === activeChatId }"
+          >
+            <button type="button" class="session-main" @click="selectChat(c.id)">
+              <span class="session-title">{{
+                c.title.trim() ? c.title : t('chat.session_untitled')
+              }}</span>
+              <span class="session-meta">{{ formatChatDate(c.updatedAt) }}</span>
+            </button>
+            <button
+              type="button"
+              class="ghost danger sm icon"
+              :aria-label="t('chat.delete_session')"
+              :disabled="thinking"
+              @click.stop="deleteChatById(c.id)"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      </div>
 
       <label class="rag" :title="t('rag.tooltip')">
         <input v-model="useRag" type="checkbox" />
@@ -349,6 +539,81 @@ async function send() {
 .ghost.icon {
   font-size: 18px;
   line-height: 1;
+}
+.ghost.sm {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+.ghost.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+.sessions {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  max-height: 220px;
+  min-height: 0;
+}
+.sessions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sessions-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  max-height: 160px;
+  padding-right: 2px;
+}
+.session-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  align-items: stretch;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.session-row.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.session-main {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 8px;
+  cursor: pointer;
+  min-width: 0;
+}
+.session-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta {
+  font-size: 11px;
+  color: var(--muted);
 }
 .hint,
 .warn {
