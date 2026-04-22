@@ -48,6 +48,8 @@ const messages = {
     new_session: 'New chat',
     delete_session: 'Delete chat',
     chat_create_error: 'Could not start a chat session.',
+    image_enlarge: 'View image larger',
+    lightbox_close: 'Close',
   },
   upload: {
     uploading: 'Uploading...',

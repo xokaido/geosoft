@@ -286,10 +286,12 @@ async function send() {
     return
   }
 
+  const attachedImage = vision.value && imageUrl.value ? imageUrl.value : undefined
   const userMsg: UiMsg = {
     id: crypto.randomUUID(),
     role: 'user',
     content: text,
+    imageUrl: attachedImage,
   }
   uiMessages.value.push(userMsg)
 

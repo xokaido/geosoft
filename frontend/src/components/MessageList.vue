@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onUnmounted, ref, watch } from 'vue'
 import { useI18n } from '../i18n'
 
 export type UiMsg = {
@@ -6,6 +7,8 @@ export type UiMsg = {
   role: 'user' | 'assistant'
   content: string
   modelName?: string
+  /** Image shown in-thread (e.g. `/api/image/...`); retained after send. */
+  imageUrl?: string | null
 }
 
 defineProps<{
@@ -15,6 +18,33 @@ defineProps<{
 }>()
 
 const { t } = useI18n()
+
+const lightboxUrl = ref<string | null>(null)
+
+let removeEscapeListener: (() => void) | null = null
+
+watch(lightboxUrl, (url) => {
+  removeEscapeListener?.()
+  removeEscapeListener = null
+  if (!url) return
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') lightboxUrl.value = null
+  }
+  window.addEventListener('keydown', onKey)
+  removeEscapeListener = () => window.removeEventListener('keydown', onKey)
+})
+
+onUnmounted(() => {
+  removeEscapeListener?.()
+})
+
+function openLightbox(url: string) {
+  lightboxUrl.value = url
+}
+
+function closeLightbox() {
+  lightboxUrl.value = null
+}
 </script>
 
 <template>
@@ -28,7 +58,18 @@ const { t } = useI18n()
       :class="m.role === 'user' ? 'user' : 'assistant'"
     >
       <div class="meta">{{ m.role === 'user' ? t('chat.you') : m.modelName || t('chat.assistant') }}</div>
-      <div class="bubble">{{ m.content }}</div>
+      <div class="bubble" :class="{ 'has-media': m.role === 'user' && m.imageUrl }">
+        <button
+          v-if="m.role === 'user' && m.imageUrl"
+          type="button"
+          class="img-btn"
+          :aria-label="t('chat.image_enlarge')"
+          @click="openLightbox(m.imageUrl!)"
+        >
+          <img :src="m.imageUrl" class="thumb" alt="" />
+        </button>
+        <div v-if="m.content" class="text">{{ m.content }}</div>
+      </div>
     </div>
 
     <div v-if="thinking" class="row assistant">
@@ -36,6 +77,22 @@ const { t } = useI18n()
       <div class="bubble skeleton">{{ t('chat.thinking') }}</div>
     </div>
   </div>
+
+  <Teleport to="body">
+    <div
+      v-if="lightboxUrl"
+      class="lightbox"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('chat.image_enlarge')"
+      @click.self="closeLightbox"
+    >
+      <button type="button" class="lightbox-close" :aria-label="t('chat.lightbox_close')" @click="closeLightbox">
+        ×
+      </button>
+      <img :src="lightboxUrl" class="lightbox-img" alt="" />
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -77,6 +134,34 @@ const { t } = useI18n()
   line-height: 1.45;
   box-shadow: var(--shadow);
 }
+.bubble.has-media {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+.img-btn {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: transparent;
+  max-width: min(280px, 85vw);
+  align-self: flex-end;
+}
+.thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 200px;
+  object-fit: contain;
+}
+.text {
+  white-space: pre-wrap;
+}
 .user .bubble {
   background: var(--user-bubble);
 }
@@ -96,5 +181,39 @@ const { t } = useI18n()
   100% {
     opacity: 0.55;
   }
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+}
+.lightbox-img {
+  max-width: min(96vw, 1400px);
+  max-height: min(90vh, 1200px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+}
+.lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 201;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #334155);
+  background: var(--surface, #111827);
+  color: var(--text, #e5e7eb);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
 }
 </style>

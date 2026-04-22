@@ -50,6 +50,8 @@ const messages: Messages = {
     new_session: 'Новый чат',
     delete_session: 'Удалить чат',
     chat_create_error: 'Не удалось создать сессию чата.',
+    image_enlarge: 'Увеличить изображение',
+    lightbox_close: 'Закрыть',
   },
   upload: {
     uploading: 'Загрузка...',

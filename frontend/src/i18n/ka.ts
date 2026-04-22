@@ -50,6 +50,8 @@ const messages: Messages = {
     new_session: 'ახალი საუბარი',
     delete_session: 'საუბრის წაშლა',
     chat_create_error: 'საუბრის სესიის დაწყება ვერ მოხერხდა.',
+    image_enlarge: 'სურათის გადიდება',
+    lightbox_close: 'დახურვა',
   },
   upload: {
     uploading: 'იტვირთება...',
