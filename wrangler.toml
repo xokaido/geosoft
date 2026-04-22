@@ -1,4 +1,4 @@
-name = "geosoft-chat"
+name = "geosoft"
 main = "worker/src/index.ts"
 compatibility_date = "2024-09-23"
 
@@ -28,6 +28,12 @@ binding = "ASSETS"
 AUTH_USERNAME = "admin"
 # Workers AI caps this per model; high values request as much output as the model allows.
 MAX_CHAT_OUTPUT_TOKENS = "131072"
+
+# OpenRouter (https://openrouter.ai/docs) — chat uses OpenRouter; RAG embeddings still use Workers AI.
+# Required secret: wrangler secret put OPENROUTER_API_KEY
+# Optional: public URL of your app for OpenRouter rankings (HTTP-Referer)
+OPENROUTER_HTTP_REFERER = "http://localhost:5173"
+OPENROUTER_APP_TITLE = "GeoSoft AI Chat"
 
 # For production, set AUTH_PASSWORD and SESSION_SECRET via `wrangler secret put`
 AUTH_PASSWORD = "changeme"

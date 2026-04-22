@@ -1,6 +1,6 @@
 # GeoSoft AI Chat
 
-Full-stack AI chat on Cloudflare Workers with RAG (Vectorize + `geosoft.ge` crawl), image upload to R2, Workers AI streaming, and a Vite + Vue 3 + Pinia frontend (Georgian / Russian / English, light/dark).
+Full-stack AI chat on Cloudflare Workers with RAG (Vectorize + `geosoft.ge` crawl), image upload to R2, **[OpenRouter](https://openrouter.ai/)** chat completions (streaming), Workers AI for embeddings only, and a Vite + Vue 3 + Pinia frontend (Georgian / Russian / English, light/dark).
 
 The original **prompt pack** files (`PROMPT_*.md`) are still in this repo if you want to regenerate or extend pieces in isolation.
 
@@ -32,9 +32,12 @@ All Wrangler commands run from the **repository root** (`wrangler.toml` is at th
    ```bash
    npx wrangler secret put AUTH_PASSWORD
    npx wrangler secret put SESSION_SECRET
+   npx wrangler secret put OPENROUTER_API_KEY
    ```
 
    Remove or override the dev fallbacks in `wrangler.toml` `[vars]` once secrets are set.
+
+   For local `wrangler dev`, copy `.dev.vars.example` to **`.dev.vars`** and set `OPENROUTER_API_KEY` (this file is gitignored).
 
 ---
 
@@ -125,22 +128,34 @@ npm run build
 | `SESSION_SECRET` | `[vars]` locally / `wrangler secret put` in prod | JWT signing key |
 | `CLOUDFLARE_ACCOUNT_ID` | `.env` (ingest script only) | Account ID for REST calls |
 | `CLOUDFLARE_API_TOKEN` | `.env` (ingest script only) | Token with AI + Vectorize permissions |
+| `OPENROUTER_API_KEY` | `wrangler secret put` / `.dev.vars` | [OpenRouter](https://openrouter.ai/) API key for chat |
+| `OPENROUTER_HTTP_REFERER` | `wrangler.toml` `[vars]` (optional) | Public URL of your app; sent as `HTTP-Referer` for OpenRouter attribution |
+| `OPENROUTER_APP_TITLE` | `wrangler.toml` `[vars]` (optional) | App title for OpenRouter (`X-OpenRouter-Title`) |
+| `MAX_CHAT_OUTPUT_TOKENS` | `wrangler.toml` `[vars]` (optional) | Requested max completion tokens (clamped in worker) |
 
 ---
 
-## Workers AI model catalog
+## Chat models (OpenRouter)
 
-The app ships a generated list of **all** models from the [Workers AI models](https://developers.cloudflare.com/workers-ai/models/) page (`worker/src/workers_ai_models.generated.json`). The chat UI only sends **`messages`** to models whose task type is **Text Generation**; other task types appear in the selector for reference but are **disabled** (embeddings, TTS, image models, etc.).
+The selector lists a small curated set from the [OpenRouter model catalog](https://openrouter.ai/models):
 
-To refresh the list after Cloudflare adds or renames models:
+| Group | Model ID | Notes |
+|-------|----------|--------|
+| Google Gemini | `google/gemini-2.5-flash` | Fast |
+| Google Gemini | `google/gemini-3.1-pro-preview` | Pro (preview) |
+| OpenAI GPT | `openai/gpt-5.4-mini` | Fast |
+| OpenAI GPT | `openai/gpt-5.4` | Frontier / reasoning-oriented |
+| Anthropic Claude | `~anthropic/claude-opus-latest` | Always tracks latest Opus |
+| Anthropic Claude | `anthropic/claude-sonnet-4.6` | Sonnet |
 
-1. Update the snapshot `data/workers-ai-models-index.md` (save the models page Markdown from the docs, or replace with a fresh export).
-2. Run `npm run models:sync` (network required; scrapes each model page for `@cf/...` IDs).
+To change the lineup, edit `worker/src/models.ts`.
+
+The optional script `npm run models:sync` still updates `worker/src/workers_ai_models.generated.json` for reference only; chat no longer reads that file.
 
 ## Notes
 
 - **Vectorize dimensions** must stay **768** for `@cf/baai/bge-base-en-v1.5` unless you recreate the index and re-ingest.
-- **Vision**: only `@cf/meta/llama-3.2-11b-vision-instruct` is marked `vision: true`; the UI hides image upload for other models.
+- **Vision**: curated OpenRouter chat models are marked with vision support for image upload in the UI (see `worker/src/models.ts`).
 - **R2**: uploads use keys under `uploads/` in the `geosoft` bucket.
 - **Meta Llama Vision license**: Cloudflare requires a one-time `{"prompt":"agree"}` call to the vision model endpoint before normal use in some accounts.
 

@@ -24,6 +24,9 @@ const { t } = useI18n()
 
 const taskRank = (task: string) => {
   const order = [
+    'Google Gemini',
+    'OpenAI GPT',
+    'Anthropic Claude',
     'Text Generation',
     'Text Embeddings',
     'Text Classification',

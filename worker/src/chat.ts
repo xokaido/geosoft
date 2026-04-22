@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import { finalizeExchange, insertUserMessage, verifyChatForUser } from './chats'
 import { getModelMeta, isChatModel, isVisionModel } from './models'
+import { openRouterChatStream } from './openrouter'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
 
@@ -76,8 +77,13 @@ function buildUserContent(text: string, imageDataUrl: string | null): string | u
 function extractStreamDelta(json: Record<string, unknown>, prevFull: { value: string }): string | null {
   const choices = json.choices
   if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
-    const delta = (choices[0] as { delta?: { content?: string } }).delta?.content
-    if (typeof delta === 'string' && delta.length) return delta
+    const delta = (choices[0] as { delta?: { content?: string; reasoning?: string } }).delta
+    if (delta && typeof delta === 'object') {
+      const bits: string[] = []
+      if (typeof delta.reasoning === 'string' && delta.reasoning.length) bits.push(delta.reasoning)
+      if (typeof delta.content === 'string' && delta.content.length) bits.push(delta.content)
+      if (bits.length) return bits.join('')
+    }
   }
   const token = json.token
   if (typeof token === 'string' && token.length) return token
@@ -307,16 +313,35 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   const userTextForDb =
     typeof last.content === 'string' ? last.content : lastUserQuery([last])
 
+  const apiKey = c.env.OPENROUTER_API_KEY?.trim()
+  if (!apiKey) {
+    return c.json(
+      { error: 'OpenRouter is not configured. Set OPENROUTER_API_KEY (wrangler secret put OPENROUTER_API_KEY).' },
+      503
+    )
+  }
+
   try {
-    const stream = await c.env.AI.run(model, {
+    const upstream = await openRouterChatStream(c.env, apiKey, {
+      model,
       messages: outMessages,
-      max_tokens: maxChatOutputTokens(c.env),
       stream: true,
+      max_tokens: maxChatOutputTokens(c.env),
     })
-    if (!(stream instanceof ReadableStream)) {
-      return c.json({ error: 'Streaming not available for this model' }, 500)
+    if (!upstream.ok) {
+      const detail = await upstream.text().catch(() => '')
+      const msg = `OpenRouter error (${upstream.status}): ${detail.slice(0, 1500)}`
+      const s = upstream.status
+      if (s === 401) return c.json({ error: msg }, 401)
+      if (s === 403) return c.json({ error: msg }, 403)
+      if (s === 429) return c.json({ error: msg }, 429)
+      if (s === 400) return c.json({ error: msg }, 400)
+      return c.json({ error: msg }, 502)
     }
-    const raw = stream as ReadableStream<Uint8Array>
+    const raw = upstream.body
+    if (!raw) {
+      return c.json({ error: 'OpenRouter returned an empty response body' }, 502)
+    }
     const [toClient, toRecorder] = raw.tee()
     const out = transformAiSseToTokenSse(toClient)
 

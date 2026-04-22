@@ -9,4 +9,10 @@ export type Env = {
   SESSION_SECRET: string
   /** Max completion tokens for `/api/chat` (string from wrangler vars). */
   MAX_CHAT_OUTPUT_TOKENS?: string
+  /** OpenRouter API key (`wrangler secret put OPENROUTER_API_KEY`). */
+  OPENROUTER_API_KEY?: string
+  /** Optional site URL for OpenRouter app attribution (`HTTP-Referer`). */
+  OPENROUTER_HTTP_REFERER?: string
+  /** Optional app title for OpenRouter rankings. */
+  OPENROUTER_APP_TITLE?: string
 }
