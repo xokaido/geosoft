@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { geosoftOverviewSeedPages } from '../worker/src/geosoft-overview.ts'
 import { chunkText, crawlGeosoft, vectorIdFor, type TextChunk } from '../worker/src/lib/crawl-chunk.ts'
 
 const INDEX = 'geosoft-rag'
@@ -91,7 +92,7 @@ async function main() {
   const token = requireEnv('CLOUDFLARE_API_TOKEN')
 
   console.log('Crawling geosoft.ge...')
-  const pages = await crawlGeosoft()
+  const pages = [...(await crawlGeosoft()), ...geosoftOverviewSeedPages()]
   const chunks: TextChunk[] = []
   for (const p of pages) {
     chunks.push(...chunkText(p))

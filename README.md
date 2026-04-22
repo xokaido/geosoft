@@ -71,7 +71,7 @@ Default credentials match `wrangler.toml` (`AUTH_USERNAME` / `AUTH_PASSWORD`) un
 npm run ingest
 ```
 
-This crawls `https://geosoft.ge`, chunks text, embeds with `@cf/baai/bge-base-en-v1.5`, and upserts into the `geosoft-rag` index.
+This crawls `https://geosoft.ge`, chunks text, embeds with `@cf/baai/bge-base-en-v1.5`, and upserts into the `geosoft-rag` index. Each run also upserts **curated overview chunks** (`worker/src/geosoft-overview.ts`) so common questions (including Georgian, e.g. what GeoSoft offers) have strong retrieval targets. Re-run ingest after editing that file.
 
 ---
 

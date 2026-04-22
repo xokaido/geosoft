@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { finalizeExchange, insertUserMessage, verifyChatForUser } from './chats'
 import { getModelMeta, isChatModel, isVisionModel } from './models'
 import { openRouterChatStream } from './openrouter'
+import { geosoftAssistantFallbackContext } from './geosoft-overview'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
 
@@ -280,20 +281,22 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
       outMessages.push({
         role: 'system',
         content:
-          'You are a helpful assistant for GeoSoft (geosoft.ge). The user enabled the geosoft.ge knowledge base.\n' +
+          'You are a helpful, friendly assistant for GeoSoft (geosoft.ge), the Georgian cloud & workplace technology partner. The user enabled the geosoft.ge knowledge base.\n' +
           'Answer using the retrieved passages below for factual claims about the company, products, and site content. ' +
           'When you use a fact from a passage, mention its source number (e.g. Source 1). ' +
-          'If something is not in the passages, say it is not in the retrieved site content rather than guessing.\n\n' +
+          'If something is not in the passages, say so honestly; prefer the same language as the user when natural.\n\n' +
           ragBlock,
       })
     } else {
       outMessages.push({
         role: 'system',
         content:
-          'The user enabled the geosoft.ge knowledge base, but no relevant passages were retrieved from the index for this question ' +
-          '(the index may be empty or the query may not match indexed language/content). ' +
-          'Say clearly that you could not find geosoft.ge content for this query. ' +
-          'You may add brief general industry context only if you label it explicitly as general knowledge, not as facts from geosoft.ge.',
+          'You are a warm, professional assistant for GeoSoft (geosoft.ge), the Georgian cloud & workplace technology partner.\n' +
+          'The live site index did not return matching snippets for this question, but you must still answer helpfully using ONLY the approved overview below. ' +
+          'Do not invent prices, contract terms, or SKU-level catalog details not stated there. ' +
+          'Answer in the same language as the user (e.g. Georgian for Georgian). Be concise, friendly, and invite them to visit geosoft.ge or contact GeoSoft for specifics.\n' +
+          'Do not open with a harsh refusal — acknowledge the question and give useful orientation.\n\n' +
+          geosoftAssistantFallbackContext(),
       })
     }
   }
