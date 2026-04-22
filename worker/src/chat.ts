@@ -60,52 +60,86 @@ function buildUserContent(text: string, imageDataUrl: string | null): string | u
   ]
 }
 
-function emitSseBlock(enc: TextEncoder, controller: ReadableStreamDefaultController<Uint8Array>, block: string) {
-  for (const line of block.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed.startsWith('data:')) continue
-    const payload = trimmed.slice(5).trim()
-    if (payload === '[DONE]') {
-      controller.enqueue(enc.encode('data: [DONE]\n\n'))
-      continue
-    }
-    try {
-      const json = JSON.parse(payload) as { response?: string }
-      const piece = json.response ?? ''
-      if (piece) {
-        controller.enqueue(enc.encode(`data: ${JSON.stringify(piece)}\n\n`))
-      }
-    } catch {
-      // ignore non-JSON noise
-    }
+/** Workers AI SSE is line-oriented (`data: {...}\\n`). `response` is often cumulative, not a per-chunk delta. */
+function extractStreamDelta(json: Record<string, unknown>, prevFull: { value: string }): string | null {
+  const choices = json.choices
+  if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
+    const delta = (choices[0] as { delta?: { content?: string } }).delta?.content
+    if (typeof delta === 'string' && delta.length) return delta
   }
+  const token = json.token
+  if (typeof token === 'string' && token.length) return token
+
+  const r = json.response
+  if (r === null || r === undefined) return null
+  if (typeof r !== 'string') return null
+
+  const prev = prevFull.value
+  if (r === prev) return null
+  if (r.startsWith(prev)) {
+    const d = r.slice(prev.length)
+    prevFull.value = r
+    return d.length ? d : null
+  }
+  prevFull.value = r
+  return r
 }
 
 function transformAiSseToTokenSse(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const dec = new TextDecoder()
   const enc = new TextEncoder()
-  let buffer = ''
+  let lineBuf = ''
+  const prevResponse = { value: '' }
+  let clientDone = false
+
+  const handleLine = (line: string, controller: ReadableStreamDefaultController<Uint8Array>) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return
+    const payload = trimmed.slice(5).trim()
+    if (payload === '[DONE]') {
+      clientDone = true
+      controller.enqueue(enc.encode('data: [DONE]\n\n'))
+      return
+    }
+    try {
+      const json = JSON.parse(payload) as Record<string, unknown>
+      const piece = extractStreamDelta(json, prevResponse)
+      if (piece) {
+        controller.enqueue(enc.encode(`data: ${JSON.stringify(piece)}\n\n`))
+      }
+    } catch {
+      // ignore non-JSON / partial lines
+    }
+  }
+
+  const appendAndDrain = (chunk: string, controller: ReadableStreamDefaultController<Uint8Array>) => {
+    lineBuf += chunk
+    for (;;) {
+      const i = lineBuf.indexOf('\n')
+      if (i < 0) break
+      let row = lineBuf.slice(0, i)
+      lineBuf = lineBuf.slice(i + 1)
+      if (row.endsWith('\r')) row = row.slice(0, -1)
+      handleLine(row, controller)
+    }
+  }
+
   return new ReadableStream({
     async start(controller) {
       const reader = source.getReader()
       try {
         while (true) {
           const { done, value } = await reader.read()
-          if (done) break
-          buffer += dec.decode(value, { stream: true })
-          const parts = buffer.split('\n\n')
-          buffer = parts.pop() ?? ''
-          for (const block of parts) {
-            emitSseBlock(enc, controller, block)
+          if (value) appendAndDrain(dec.decode(value, { stream: true }), controller)
+          if (done) {
+            appendAndDrain(dec.decode(), controller)
+            if (lineBuf.trim()) handleLine(lineBuf, controller)
+            break
           }
         }
-        buffer += dec.decode()
-        if (buffer.trim()) {
-          for (const block of buffer.split('\n\n')) {
-            if (block.trim()) emitSseBlock(enc, controller, block)
-          }
+        if (!clientDone) {
+          controller.enqueue(enc.encode('data: [DONE]\n\n'))
         }
-        controller.enqueue(enc.encode('data: [DONE]\n\n'))
       } finally {
         reader.releaseLock()
         controller.close()

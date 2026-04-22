@@ -88,38 +88,48 @@ async function readTokenStream(resp: Response, onToken: (t: string) => void) {
   if (!reader) throw new Error('no_body')
   const dec = new TextDecoder()
   let buf = ''
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return false
+    const payload = trimmed.slice(5).trim()
+    if (payload === '[DONE]') return true
+    try {
+      const v = JSON.parse(payload) as unknown
+      if (typeof v === 'string' && v.length) onToken(v)
+    } catch {
+      // ignore
+    }
+    return false
+  }
+
+  const drain = (flushPartial: boolean) => {
+    for (;;) {
+      const i = buf.indexOf('\n')
+      if (i < 0) break
+      let row = buf.slice(0, i)
+      buf = buf.slice(i + 1)
+      if (row.endsWith('\r')) row = row.slice(0, -1)
+      if (consumeLine(row)) return true
+    }
+    if (flushPartial && buf.trim()) {
+      const t = buf.trim()
+      buf = ''
+      if (consumeLine(t)) return true
+    }
+    return false
+  }
+
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
-    buf += dec.decode(value, { stream: true })
-    const parts = buf.split('\n\n')
-    buf = parts.pop() ?? ''
-    for (const block of parts) {
-      for (const line of block.split('\n')) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data:')) continue
-        const payload = trimmed.slice(5).trim()
-        if (payload === '[DONE]') return
-        try {
-          onToken(JSON.parse(payload) as string)
-        } catch {
-          // ignore
-        }
-      }
+    if (value) {
+      buf += dec.decode(value, { stream: true })
+      if (drain(false)) return
     }
-  }
-  const tail = buf.trim()
-  if (tail) {
-    for (const line of tail.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed.startsWith('data:')) continue
-      const payload = trimmed.slice(5).trim()
-      if (payload === '[DONE]') return
-      try {
-        onToken(JSON.parse(payload) as string)
-      } catch {
-        // ignore
-      }
+    if (done) {
+      buf += dec.decode()
+      if (drain(true)) return
+      break
     }
   }
 }
