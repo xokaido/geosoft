@@ -141,7 +141,7 @@ The selector lists a small curated set from the [OpenRouter model catalog](https
 
 | Group | Model ID | Notes |
 |-------|----------|--------|
-| Google Gemini | `google/gemini-2.5-flash` | Fast |
+| Google Gemini | `google/gemini-3-flash-preview` | Fast (newer than 2.5 Flash) |
 | Google Gemini | `google/gemini-3.1-pro-preview` | Pro (preview) |
 | OpenAI GPT | `openai/gpt-5.4-mini` | Fast |
 | OpenAI GPT | `openai/gpt-5.4` | Frontier / reasoning-oriented |
