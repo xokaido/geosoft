@@ -485,10 +485,14 @@ async function send() {
 
 <style scoped>
 .shell {
+  flex: 1;
+  min-height: 0;
   height: 100%;
+  max-height: 100dvh;
   display: grid;
   grid-template-columns: 320px 1fr;
   position: relative;
+  overflow: hidden;
 }
 .sidebar {
   border-right: 1px solid var(--border);
@@ -498,6 +502,7 @@ async function send() {
   gap: 14px;
   align-content: start;
   height: 100%;
+  min-height: 0;
   overflow: auto;
 }
 .brand {
@@ -628,13 +633,17 @@ async function send() {
   display: grid;
   grid-template-rows: 1fr auto auto;
   min-width: 0;
+  min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 .scroll {
+  min-height: 0;
   overflow: auto;
   padding: 14px 16px 10px;
 }
 .preview {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -655,6 +664,7 @@ async function send() {
   cursor: pointer;
 }
 .composer {
+  flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--surface);
   padding: 12px 16px 16px;

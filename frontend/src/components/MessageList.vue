@@ -43,7 +43,7 @@ const { t } = useI18n()
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px 4px 120px;
+  padding: 12px 4px 20px;
 }
 .empty {
   color: var(--muted);

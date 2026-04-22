@@ -16,8 +16,11 @@ export async function embedTexts(env: Env, texts: string[]): Promise<number[][]>
 }
 
 export async function retrieveRagContext(env: Env, query: string): Promise<string> {
-  const [vector] = await embedTexts(env, [query])
-  const q = await env.VECTORIZE.query(vector, { topK: 5, returnMetadata: 'all' })
+  const trimmed = query.trim()
+  if (!trimmed) return ''
+
+  const [vector] = await embedTexts(env, [trimmed])
+  const q = await env.VECTORIZE.query(vector, { topK: 8, returnMetadata: 'all' })
   const parts = (q.matches ?? []).map((m, i) => {
     const meta = asMeta(m.metadata)
     const url = String(meta.url ?? '')

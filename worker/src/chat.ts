@@ -4,6 +4,17 @@ import { getModelMeta, isChatModel, isVisionModel } from './models'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
 
+const DEFAULT_MAX_OUTPUT_TOKENS = 131_072
+const ABSOLUTE_MAX_OUTPUT_TOKENS = 200_000
+
+function maxChatOutputTokens(env: Env): number {
+  const raw = env.MAX_CHAT_OUTPUT_TOKENS
+  if (raw === undefined || raw === '') return DEFAULT_MAX_OUTPUT_TOKENS
+  const n = Number.parseInt(String(raw).trim(), 10)
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_OUTPUT_TOKENS
+  return Math.min(Math.floor(n), ABSOLUTE_MAX_OUTPUT_TOKENS)
+}
+
 type ChatMessage = { role: string; content: string | unknown[] }
 
 function lastUserQuery(messages: ChatMessage[]): string {
@@ -242,6 +253,9 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     }
   }
 
+  const ragOn = !!body.useRag
+  const hasRagContext = ragBlock.trim().length > 0
+
   const vision = isVisionModel(model)
   let imageDataUrl: string | null = null
   if (body.imageUrl) {
@@ -255,13 +269,27 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   }
 
   const outMessages: ChatMessage[] = []
-  if (ragBlock) {
-    outMessages.push({
-      role: 'system',
-      content:
-        'You are a helpful assistant. Use the following retrieved context from geosoft.ge when relevant. If context is irrelevant, ignore it.\n\n' +
-        ragBlock,
-    })
+  if (ragOn) {
+    if (hasRagContext) {
+      outMessages.push({
+        role: 'system',
+        content:
+          'You are a helpful assistant for GeoSoft (geosoft.ge). The user enabled the geosoft.ge knowledge base.\n' +
+          'Answer using the retrieved passages below for factual claims about the company, products, and site content. ' +
+          'When you use a fact from a passage, mention its source number (e.g. Source 1). ' +
+          'If something is not in the passages, say it is not in the retrieved site content rather than guessing.\n\n' +
+          ragBlock,
+      })
+    } else {
+      outMessages.push({
+        role: 'system',
+        content:
+          'The user enabled the geosoft.ge knowledge base, but no relevant passages were retrieved from the index for this question ' +
+          '(the index may be empty or the query may not match indexed language/content). ' +
+          'Say clearly that you could not find geosoft.ge content for this query. ' +
+          'You may add brief general industry context only if you label it explicitly as general knowledge, not as facts from geosoft.ge.',
+      })
+    }
   }
   for (const m of messages) {
     if (m.role === 'user' && imageDataUrl && m === messages[messages.length - 1]) {
@@ -282,7 +310,7 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   try {
     const stream = await c.env.AI.run(model, {
       messages: outMessages,
-      max_tokens: 1024,
+      max_tokens: maxChatOutputTokens(c.env),
       stream: true,
     })
     if (!(stream instanceof ReadableStream)) {

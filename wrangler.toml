@@ -26,6 +26,8 @@ binding = "ASSETS"
 
 [vars]
 AUTH_USERNAME = "admin"
+# Workers AI caps this per model; high values request as much output as the model allows.
+MAX_CHAT_OUTPUT_TOKENS = "131072"
 
 # For production, set AUTH_PASSWORD and SESSION_SECRET via `wrangler secret put`
 AUTH_PASSWORD = "changeme"
