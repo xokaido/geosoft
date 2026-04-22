@@ -17,29 +17,30 @@ The original **prompt pack** files (`PROMPT_*.md`) are still in this repo if you
 
 ## Cloudflare setup
 
+All Wrangler commands run from the **repository root** (`wrangler.toml` is at the root).
+
 1. Authenticate: `wrangler login`
-2. **D1**: `cd worker && npx wrangler d1 create geosoft-chat-db` — copy `database_id` into `worker/wrangler.toml`
-3. **Migrations**: `cd worker && npx wrangler d1 migrations apply geosoft-chat-db --remote`
-4. **R2**: `cd worker && npx wrangler r2 bucket create geosoft` (or confirm it exists)
+2. **D1**: `npx wrangler d1 create geosoft-chat-db` — copy `database_id` into `wrangler.toml`
+3. **Migrations**: `npx wrangler d1 migrations apply geosoft-chat-db --remote`
+4. **R2**: `npx wrangler r2 bucket create geosoft` (or confirm it exists)
 5. **Vectorize** (768 dims, cosine, matches `@cf/baai/bge-base-en-v1.5`):
 
-   `cd worker && npx wrangler vectorize create geosoft-rag --dimensions=768 --metric=cosine`
+   `npx wrangler vectorize create geosoft-rag --dimensions=768 --metric=cosine`
 
 6. **Secrets** (recommended for production):
 
    ```bash
-   cd worker
    npx wrangler secret put AUTH_PASSWORD
    npx wrangler secret put SESSION_SECRET
    ```
 
-   Remove or override the dev fallbacks in `worker/wrangler.toml` `[vars]` once secrets are set.
+   Remove or override the dev fallbacks in `wrangler.toml` `[vars]` once secrets are set.
 
 ---
 
 ## Local development
 
-Install dependencies (workspaces):
+Install dependencies:
 
 ```bash
 npm install
@@ -54,7 +55,7 @@ npm run dev
 - Frontend: http://localhost:5173 (proxies `/api` → http://127.0.0.1:8787)
 - Worker: http://127.0.0.1:8787
 
-Default credentials match `worker/wrangler.toml` (`AUTH_USERNAME` / `AUTH_PASSWORD`) until you change them.
+Default credentials match `wrangler.toml` (`AUTH_USERNAME` / `AUTH_PASSWORD`) until you change them.
 
 ---
 
@@ -73,11 +74,45 @@ This crawls `https://geosoft.ge`, chunks text, embeds with `@cf/baai/bge-base-en
 
 ## Production deploy
 
+Single Worker serves **both** the API and the static SPA. Vite outputs to **`dist/`** at the repo root; Wrangler uploads that folder as `[assets]` (see `wrangler.toml`).
+
 ```bash
 npm run build
 ```
 
-This builds the Vue app into `worker/public/` and runs `wrangler deploy` from `worker/`.
+This runs `vite build` (→ `dist/`) then `wrangler deploy` from the repo root.
+
+### Cloudflare Workers (GitHub / CI)
+
+Wrangler **v4** needs the **`dist/`** folder to exist before deploy (Vite writes it). Cloudflare already runs **`npm ci`** (or equivalent) before your custom build command—**do not** put `npm ci &&` in the build command or you install dependencies twice.
+
+**Build command** (pick one):
+
+```bash
+npx vite build --config frontend/vite.config.ts
+```
+
+This works even if an older `package.json` on GitHub is missing the `build:assets` script. Alternatively, on the latest repo:
+
+```bash
+npm run build:assets
+```
+
+**Deploy command**:
+
+```bash
+npx wrangler deploy
+```
+
+If the dashboard has a single “build & deploy” step and you are on the **latest** `package.json` from this repo:
+
+```bash
+npm run build
+```
+
+(`npm run build` = `build:assets` + `wrangler deploy`.)
+
+**If you see `Missing script: "build:assets"`:** the commit Cloudflare built does not include the current root `package.json`. Push your latest changes to the default branch (or change the Workers build branch), or use the `npx vite build --config frontend/vite.config.ts` build command above.
 
 ---
 
@@ -85,7 +120,7 @@ This builds the Vue app into `worker/public/` and runs `wrangler deploy` from `w
 
 | Variable | Where | Description |
 |----------|-------|-------------|
-| `AUTH_USERNAME` | `worker/wrangler.toml` `[vars]` | Login username |
+| `AUTH_USERNAME` | `wrangler.toml` `[vars]` | Login username |
 | `AUTH_PASSWORD` | `[vars]` locally / `wrangler secret put` in prod | Login password |
 | `SESSION_SECRET` | `[vars]` locally / `wrangler secret put` in prod | JWT signing key |
 | `CLOUDFLARE_ACCOUNT_ID` | `.env` (ingest script only) | Account ID for REST calls |

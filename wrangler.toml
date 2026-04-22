@@ -1,0 +1,32 @@
+name = "geosoft-chat"
+main = "worker/src/index.ts"
+compatibility_date = "2024-09-23"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "geosoft-chat-db"
+database_id = "86fed29e-3de0-4368-a9c9-aed6d4a15bac"
+migrations_dir = "worker/migrations"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "geosoft"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "geosoft-rag"
+
+# Vite writes the SPA here; one deploy surface for CI + Wrangler v4
+[assets]
+directory = "dist"
+binding = "ASSETS"
+
+[vars]
+AUTH_USERNAME = "admin"
+
+# For production, set AUTH_PASSWORD and SESSION_SECRET via `wrangler secret put`
+AUTH_PASSWORD = "changeme"
+SESSION_SECRET = "dev-only-change-me-use-wrangler-secret-in-prod"

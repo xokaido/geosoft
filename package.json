@@ -1,25 +1,35 @@
 {
   "name": "geosoft-chat",
   "private": true,
-  "workspaces": [
-    "worker",
-    "frontend"
-  ],
+  "type": "module",
   "scripts": {
     "dev": "concurrently -n worker,web -c blue,green \"npm run dev:worker\" \"npm run dev:frontend\"",
-    "dev:worker": "cd worker && wrangler dev",
-    "dev:frontend": "cd frontend && vite --port 5173",
-    "build": "cd frontend && vite build --outDir ../worker/public && cd ../worker && wrangler deploy",
-    "build:frontend": "cd frontend && vite build --outDir ../worker/public",
-    "deploy": "cd worker && wrangler deploy",
-    "ingest": "npx tsx scripts/ingest-geosoft.ts"
+    "dev:worker": "wrangler dev",
+    "dev:frontend": "vite --config frontend/vite.config.ts --port 5173",
+    "build:assets": "vite build --config frontend/vite.config.ts",
+    "build": "npm run build:assets && wrangler deploy",
+    "deploy": "wrangler deploy",
+    "ingest": "npx tsx scripts/ingest-geosoft.ts",
+    "typecheck": "vue-tsc -p frontend/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.12",
+    "jose": "^5.9.6",
+    "node-html-parser": "^6.1.13",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "@vitejs/plugin-vue": "^5.2.1",
     "@types/node": "^22.10.0",
     "concurrently": "^9.1.0",
     "dotenv": "^16.4.5",
-    "node-html-parser": "^6.1.13",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "vue-tsc": "^2.1.10",
+    "wrangler": "^4.14.4"
   }
 }
