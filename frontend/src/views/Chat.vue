@@ -32,7 +32,9 @@ const streamingModelName = ref('')
 const listRef = ref<HTMLElement | null>(null)
 
 const selectedModel = computed(() => models.value.find((m) => m.id === modelId.value))
-const vision = computed(() => !!selectedModel.value?.vision)
+const vision = computed(
+  () => !!selectedModel.value?.vision && !!selectedModel.value?.chatEligible
+)
 
 onMounted(async () => {
   try {
@@ -43,7 +45,8 @@ onMounted(async () => {
     }
     const data = (await r.json()) as UiModel[]
     models.value = data
-    modelId.value = data[0]?.id ?? ''
+    const firstChat = data.find((m) => m.chatEligible)
+    modelId.value = firstChat?.id ?? data[0]?.id ?? ''
   } finally {
     modelsLoading.value = false
   }

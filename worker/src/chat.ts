@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import { isAllowedModel, isVisionModel } from './models'
+import { isChatModel, isVisionModel } from './models'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
 
@@ -128,8 +128,8 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   }
   const model = body.model
   const messages = body.messages
-  if (!model || !isAllowedModel(model)) {
-    return c.json({ error: 'Unsupported model' }, 400)
+  if (!model || !isChatModel(model)) {
+    return c.json({ error: 'Unsupported model for chat' }, 400)
   }
   if (!Array.isArray(messages) || !messages.length) {
     return c.json({ error: 'messages required' }, 400)

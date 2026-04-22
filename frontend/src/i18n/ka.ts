@@ -23,6 +23,7 @@ const messages: Messages = {
     label: 'AI მოდელი',
     placeholder: 'აირჩიეთ მოდელი',
     vision_badge: 'ხედვა',
+    deprecated: 'მოძველებული',
     groups: {
       text: 'ტექსტური მოდელები',
       vision: 'ვიზუალური მოდელები',

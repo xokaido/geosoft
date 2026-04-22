@@ -21,6 +21,7 @@ const messages = {
     label: 'AI Model',
     placeholder: 'Select a model',
     vision_badge: 'Vision',
+    deprecated: 'deprecated',
     groups: {
       text: 'Text Models',
       vision: 'Vision Models',

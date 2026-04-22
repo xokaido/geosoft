@@ -23,6 +23,7 @@ const messages: Messages = {
     label: 'Модель ИИ',
     placeholder: 'Выберите модель',
     vision_badge: 'Зрение',
+    deprecated: 'устарело',
     groups: {
       text: 'Текстовые модели',
       vision: 'Модели с зрением',

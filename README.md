@@ -128,6 +128,15 @@ npm run build
 
 ---
 
+## Workers AI model catalog
+
+The app ships a generated list of **all** models from the [Workers AI models](https://developers.cloudflare.com/workers-ai/models/) page (`worker/src/workers_ai_models.generated.json`). The chat UI only sends **`messages`** to models whose task type is **Text Generation**; other task types appear in the selector for reference but are **disabled** (embeddings, TTS, image models, etc.).
+
+To refresh the list after Cloudflare adds or renames models:
+
+1. Update the snapshot `data/workers-ai-models-index.md` (save the models page Markdown from the docs, or replace with a fresh export).
+2. Run `npm run models:sync` (network required; scrapes each model page for `@cf/...` IDs).
+
 ## Notes
 
 - **Vectorize dimensions** must stay **768** for `@cf/baai/bge-base-en-v1.5` unless you recreate the index and re-ingest.
