@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import {
+  pickChatImageFiles,
+  uploadChatImageFiles,
+  type ChatImageUploadErrorKey,
+} from '../lib/chat-image-upload'
 import { useI18n } from '../i18n'
 
 const { t } = useI18n()
 
-const props = defineProps<{
-  disabled?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    disabled?: boolean
+    /** `icon` = compact control for toolbars; `block` = full-width dashed control */
+    variant?: 'block' | 'icon'
+  }>(),
+  { variant: 'block' }
+)
+
+const isIcon = computed(() => props.variant === 'icon')
 
 const emit = defineEmits<{
   uploaded: [urls: string[]]
@@ -14,15 +26,42 @@ const emit = defineEmits<{
 }>()
 
 const MAX_FILES = 12
-const MAX_BYTES = 10 * 1024 * 1024
-const OK_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
 const uploading = ref(false)
 const inputRef = ref<HTMLInputElement | null>(null)
+const dropActive = ref(false)
+
+function mapErr(key: ChatImageUploadErrorKey): string {
+  if (key === 'invalid_type') return t('upload.invalid_type')
+  if (key === 'too_large') return t('upload.too_large')
+  return t('upload.error')
+}
 
 function open() {
   if (props.disabled || uploading.value) return
   inputRef.value?.click()
+}
+
+async function ingestFiles(files: File[]) {
+  const images = pickChatImageFiles(files)
+  if (!images.length) {
+    emit('error', t('upload.invalid_type'))
+    return
+  }
+  const batch = images.slice(0, MAX_FILES)
+  uploading.value = true
+  try {
+    const result = await uploadChatImageFiles(batch)
+    if ('error' in result) {
+      emit('error', mapErr(result.error))
+      return
+    }
+    if (result.urls.length) emit('uploaded', result.urls)
+  } catch {
+    emit('error', t('upload.error'))
+  } finally {
+    uploading.value = false
+  }
 }
 
 async function onPick(e: Event) {
@@ -30,46 +69,57 @@ async function onPick(e: Event) {
   const picked = input.files ? Array.from(input.files) : []
   input.value = ''
   if (!picked.length) return
-  const files = picked.slice(0, MAX_FILES)
-  for (const file of files) {
-    if (!OK_TYPES.includes(file.type)) {
-      emit('error', t('upload.invalid_type'))
-      return
-    }
-    if (file.size > MAX_BYTES) {
-      emit('error', t('upload.too_large'))
-      return
-    }
-  }
-  uploading.value = true
-  try {
-    const urls: string[] = []
-    for (const file of files) {
-      const fd = new FormData()
-      fd.set('file', file)
-      const r = await fetch('/api/upload', { method: 'POST', body: fd, credentials: 'include' })
-      if (!r.ok) {
-        emit('error', t('upload.error'))
-        return
-      }
-      const j = (await r.json()) as { url?: string }
-      if (!j.url) {
-        emit('error', t('upload.error'))
-        return
-      }
-      urls.push(j.url)
-    }
-    if (urls.length) emit('uploaded', urls)
-  } catch {
-    emit('error', t('upload.error'))
-  } finally {
-    uploading.value = false
-  }
+  await ingestFiles(picked)
 }
+
+function isFileDrag(dt: DataTransfer | null): boolean {
+  return !!dt?.types?.length && Array.from(dt.types).includes('Files')
+}
+
+function onDragOver(e: DragEvent) {
+  if (props.disabled || uploading.value || !isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  dropActive.value = true
+}
+
+function onDragLeave(e: DragEvent) {
+  const wrap = e.currentTarget as HTMLElement
+  const rel = e.relatedTarget as Node | null
+  if (rel && wrap.contains(rel)) return
+  dropActive.value = false
+}
+
+async function onDrop(e: DragEvent) {
+  dropActive.value = false
+  if (props.disabled || uploading.value) return
+  e.preventDefault()
+  const list = e.dataTransfer?.files
+  if (!list?.length) return
+  await ingestFiles(Array.from(list))
+}
+
+function onWindowDragEnd() {
+  dropActive.value = false
+}
+
+onMounted(() => {
+  window.addEventListener('dragend', onWindowDragEnd)
+})
+onUnmounted(() => {
+  window.removeEventListener('dragend', onWindowDragEnd)
+})
 </script>
 
 <template>
-  <div class="wrap">
+  <div
+    class="wrap"
+    :class="{ 'wrap--drop': dropActive, 'wrap--icon': isIcon }"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+    <div v-if="dropActive" class="drop-hint" aria-hidden="true">{{ t('chat.drop_images') }}</div>
     <input
       ref="inputRef"
       class="hidden"
@@ -78,13 +128,71 @@ async function onPick(e: Event) {
       accept="image/jpeg,image/png,image/webp,image/gif"
       @change="onPick"
     />
-    <button type="button" class="btn" :disabled="disabled || uploading" @click="open">
+    <button
+      v-if="isIcon"
+      type="button"
+      class="btn btn--icon"
+      :disabled="disabled || uploading"
+      :title="uploading ? t('upload.uploading') : t('chat.attach_image')"
+      :aria-label="uploading ? t('upload.uploading') : t('chat.attach_image')"
+      @click="open"
+    >
+      <span v-if="uploading" class="btn-icon-label">{{ t('upload.uploading') }}</span>
+      <svg
+        v-else
+        class="btn-ico"
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="3" y="5" width="18" height="14" rx="2.5" />
+        <circle cx="8.5" cy="10" r="1.35" fill="currentColor" stroke="none" />
+        <path d="M21 15l-5.08-5.08a1.6 1.6 0 0 0-2.26 0L9 14.5" />
+      </svg>
+    </button>
+    <button v-else type="button" class="btn" :disabled="disabled || uploading" @click="open">
       {{ uploading ? t('upload.uploading') : t('chat.attach_image') }}
     </button>
   </div>
 </template>
 
 <style scoped>
+.wrap {
+  position: relative;
+  border-radius: 12px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.wrap--icon {
+  display: inline-flex;
+  width: auto;
+  align-self: end;
+}
+.wrap--drop {
+  border: 2px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 10px;
+}
 .hidden {
   display: none;
 }
@@ -95,9 +203,56 @@ async function onPick(e: Event) {
   border-radius: 10px;
   padding: 10px;
   cursor: pointer;
+  position: relative;
+  z-index: 0;
+}
+.wrap--drop .btn {
+  border-color: transparent;
 }
 .btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+.btn--icon {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  flex-shrink: 0;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.btn--icon:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+}
+.btn--icon:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.wrap--drop .btn--icon {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+.btn-ico {
+  display: block;
+}
+.btn-icon-label {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  padding: 0 4px;
+  color: var(--muted);
 }
 </style>

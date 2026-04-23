@@ -39,6 +39,8 @@ const messages: Messages = {
     thinking: 'ფიქრობს...',
     attach_image: 'ფოტოების დამატება',
     image_message_placeholder: '(ფოტოები მიმაგრებულია — დაწერეთ რა გსურთ შეფასდეს.)',
+    drop_images: 'გადააგდეთ სურათები მისაბმელად',
+    max_images_reached: 'უკვე გაქვთ მაქსიმალური რაოდენობის ფოტო (12). წაშალეთ ერთი, რომ დაამატოთ.',
     remove_image: 'სურათის წაშლა',
     image_preview: 'სურათის გადახედვა',
     you: 'თქვენ',
@@ -58,10 +60,6 @@ const messages: Messages = {
     rename_save: 'შენახვა',
     rename_cancel: 'გაუქმება',
     rename_placeholder: 'საუბრის სათაური',
-    system_prompt_label: 'ინსტრუქცია AI-სთვის',
-    system_prompt_hint:
-      'იგზავნება მოდელთან ყოველ შეტყობინებაზე. ინახება მხოლოდ ამ ბრაუზერში (ლოკალურად). ცარიელი ველი = გამორთული.',
-    system_prompt_reset: 'ნაგულისხმევზე დაბრუნება',
     model_current: 'მოდელი',
   },
   upload: {

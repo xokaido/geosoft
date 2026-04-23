@@ -5,6 +5,7 @@ import { openRouterChatStream } from './openrouter'
 import { geosoftAssistantFallbackContext } from './geosoft-overview'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
+import bundledChatSystemPrompt from './prompts/chat-system.md'
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 131_072
 const ABSOLUTE_MAX_OUTPUT_TOKENS = 200_000
@@ -225,7 +226,6 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     imageUrls?: string[]
     useRag?: boolean
     chatId?: string
-    systemPrompt?: string
   }
   try {
     body = await c.req.json()
@@ -292,14 +292,10 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     }
   }
 
-  const userSystem =
-    typeof body.systemPrompt === 'string' && body.systemPrompt.trim().length
-      ? body.systemPrompt.trim()
-      : ''
-
   const outMessages: ChatMessage[] = []
-  if (userSystem) {
-    outMessages.push({ role: 'system', content: userSystem })
+  const hiddenSystem = String(bundledChatSystemPrompt).trim()
+  if (hiddenSystem) {
+    outMessages.push({ role: 'system', content: hiddenSystem })
   }
   if (ragOn) {
     if (hasRagContext) {

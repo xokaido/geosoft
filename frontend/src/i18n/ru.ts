@@ -39,6 +39,8 @@ const messages: Messages = {
     thinking: 'Думает...',
     attach_image: 'Добавить фото',
     image_message_placeholder: '(Фото прикреплены — уточните, что именно оценить.)',
+    drop_images: 'Отпустите изображения, чтобы прикрепить',
+    max_images_reached: 'Уже максимум фото (12). Удалите одно, чтобы добавить ещё.',
     remove_image: 'Удалить изображение',
     image_preview: 'Предпросмотр',
     you: 'Вы',
@@ -58,10 +60,6 @@ const messages: Messages = {
     rename_save: 'Сохранить',
     rename_cancel: 'Отмена',
     rename_placeholder: 'Название чата',
-    system_prompt_label: 'Инструкции для ИИ',
-    system_prompt_hint:
-      'Отправляются модели с каждым сообщением. Хранятся только в этом браузере. Пустое поле — отключить.',
-    system_prompt_reset: 'Сбросить к умолчанию',
     model_current: 'Модель',
   },
   upload: {

@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ImageUpload from '../components/ImageUpload.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import MessageList, { type UiMsg } from '../components/MessageList.vue'
 import ModelSelector, { type UiModel } from '../components/ModelSelector.vue'
-import { CAR_INSPECTOR_DEFAULT_SYSTEM_PROMPT } from '../constants/car-inspector-prompt'
+import {
+  pickChatImageFiles,
+  uploadChatImageFiles,
+  type ChatImageUploadErrorKey,
+} from '../lib/chat-image-upload'
 import { useI18n } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 
 const GEMINI_FAST_MODEL_ID = 'google/gemini-3-flash-preview'
-const SYSTEM_PROMPT_STORAGE_KEY = 'geosoft-chat-system-prompt'
 const MAX_IMAGES = 12
 
 const router = useRouter()
@@ -27,7 +30,6 @@ const useRag = ref(false)
 const draft = ref('')
 const imageUrls = ref<string[]>([])
 const uploadHint = ref('')
-const systemPrompt = ref('')
 const renameChatId = ref<string | null>(null)
 const renameDraft = ref('')
 
@@ -43,6 +45,8 @@ const thinking = ref(false)
 const streamingModelName = ref('')
 
 const listRef = ref<HTMLElement | null>(null)
+const dragOverZone = ref<null | 'messages' | 'composer'>(null)
+const dropUploading = ref(false)
 
 const selectedModel = computed(() => models.value.find((m) => m.id === modelId.value))
 const vision = computed(
@@ -66,11 +70,20 @@ onMounted(async () => {
     const fast = data.find((m) => m.id === GEMINI_FAST_MODEL_ID && m.chatEligible)
     const firstChat = data.find((m) => m.chatEligible)
     modelId.value = fast?.id ?? firstChat?.id ?? data[0]?.id ?? ''
-    const savedPrompt = localStorage.getItem(SYSTEM_PROMPT_STORAGE_KEY)
-    systemPrompt.value = savedPrompt === null ? CAR_INSPECTOR_DEFAULT_SYSTEM_PROMPT : savedPrompt
   } finally {
     modelsLoading.value = false
   }
+})
+
+function clearDropZone() {
+  dragOverZone.value = null
+}
+
+onMounted(() => {
+  window.addEventListener('dragend', clearDropZone)
+})
+onUnmounted(() => {
+  window.removeEventListener('dragend', clearDropZone)
 })
 
 watch(
@@ -81,18 +94,6 @@ watch(
   },
   { flush: 'post' }
 )
-
-watch(systemPrompt, (v) => {
-  try {
-    localStorage.setItem(SYSTEM_PROMPT_STORAGE_KEY, v)
-  } catch {
-    /* ignore quota */
-  }
-})
-
-function resetSystemPrompt() {
-  systemPrompt.value = CAR_INSPECTOR_DEFAULT_SYSTEM_PROMPT
-}
 
 async function loadChats() {
   if (!modelId.value) return
@@ -257,6 +258,63 @@ function removeImageAt(i: number) {
   imageUrls.value = imageUrls.value.filter((_, idx) => idx !== i)
 }
 
+function mapUploadErr(key: ChatImageUploadErrorKey): string {
+  if (key === 'invalid_type') return t('upload.invalid_type')
+  if (key === 'too_large') return t('upload.too_large')
+  return t('upload.error')
+}
+
+function isFileDrag(dt: DataTransfer | null): boolean {
+  return !!dt?.types?.length && Array.from(dt.types).includes('Files')
+}
+
+function onDragOverZone(e: DragEvent, zone: 'messages' | 'composer') {
+  if (!vision.value || thinking.value || dropUploading.value) return
+  if (!isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  dragOverZone.value = zone
+}
+
+function onDragLeaveZone(e: DragEvent, zone: 'messages' | 'composer') {
+  const cur = e.currentTarget as HTMLElement
+  const rel = e.relatedTarget as Node | null
+  if (rel && cur.contains(rel)) return
+  if (dragOverZone.value === zone) dragOverZone.value = null
+}
+
+async function onDropZone(e: DragEvent, _zone: 'messages' | 'composer') {
+  dragOverZone.value = null
+  if (!vision.value || thinking.value) return
+  e.preventDefault()
+  const raw = e.dataTransfer?.files
+  if (!raw?.length) return
+  const images = pickChatImageFiles(Array.from(raw))
+  if (!images.length) {
+    onUploadError(t('upload.invalid_type'))
+    return
+  }
+  const room = MAX_IMAGES - imageUrls.value.length
+  if (room <= 0) {
+    onUploadError(t('chat.max_images_reached'))
+    return
+  }
+  const batch = images.slice(0, room)
+  dropUploading.value = true
+  try {
+    const result = await uploadChatImageFiles(batch)
+    if ('error' in result) {
+      onUploadError(mapUploadErr(result.error))
+      return
+    }
+    if (result.urls.length) onImagesUploaded(result.urls)
+  } catch {
+    onUploadError(t('upload.error'))
+  } finally {
+    dropUploading.value = false
+  }
+}
+
 function openRename(c: ApiChat) {
   renameChatId.value = c.id
   renameDraft.value = c.title.trim() ? c.title : ''
@@ -384,8 +442,6 @@ async function send() {
     messages: payloadMessages,
     useRag: useRag.value,
   }
-  const sp = systemPrompt.value.trim()
-  if (sp) body.systemPrompt = sp
   if (imageUrls.value.length && vision.value) {
     body.imageUrls = [...imageUrls.value]
   }
@@ -549,21 +605,6 @@ async function send() {
         </div>
       </div>
 
-      <div class="system-block">
-        <label class="system-label" for="sys-prompt">{{ t('chat.system_prompt_label') }}</label>
-        <p class="system-hint">{{ t('chat.system_prompt_hint') }}</p>
-        <textarea
-          id="sys-prompt"
-          v-model="systemPrompt"
-          class="system-input"
-          rows="5"
-          spellcheck="false"
-        />
-        <button type="button" class="btn-linkish" @click="resetSystemPrompt">
-          {{ t('chat.system_prompt_reset') }}
-        </button>
-      </div>
-
       <label class="rag rag--hidden" :title="t('rag.tooltip')">
         <input v-model="useRag" type="checkbox" />
         <span>{{ t('rag.label') }}</span>
@@ -584,15 +625,26 @@ async function send() {
         <button class="ghost" type="button" @click="logout">{{ t('nav.logout') }}</button>
       </div>
 
-      <p v-if="!vision" class="hint">{{ t('chat.vision_only') }}</p>
-      <ImageUpload v-if="vision" :disabled="thinking" @uploaded="onImagesUploaded" @error="onUploadError" />
-      <p v-if="uploadHint" class="warn">{{ uploadHint }}</p>
     </aside>
 
     <div class="backdrop" :class="{ on: sidebarOpen }" @click="sidebarOpen = false" />
 
     <main class="main">
-      <div ref="listRef" class="scroll">
+      <div
+        ref="listRef"
+        class="scroll drop-zone"
+        :class="{ 'drop-zone--active': dragOverZone === 'messages' }"
+        @dragover.capture="onDragOverZone($event, 'messages')"
+        @dragleave="onDragLeaveZone($event, 'messages')"
+        @drop.capture="onDropZone($event, 'messages')"
+      >
+        <div
+          v-if="dragOverZone === 'messages' && vision"
+          class="drop-overlay"
+          aria-hidden="true"
+        >
+          {{ dropUploading ? t('upload.uploading') : t('chat.drop_images') }}
+        </div>
         <MessageList
           :messages="uiMessages"
           :thinking="thinking"
@@ -609,17 +661,49 @@ async function send() {
         </div>
       </div>
 
-      <div class="composer">
-        <textarea
-          v-model="draft"
-          rows="3"
-          class="input"
-          :placeholder="t('chat.placeholder')"
-          @keydown="onKeydown"
-        />
-        <button class="send" type="button" :disabled="thinking || !modelId" @click="send">
-          {{ t('chat.send') }}
-        </button>
+      <div
+        class="composer drop-zone"
+        :class="{ 'drop-zone--active': dragOverZone === 'composer' }"
+        @dragover.capture="onDragOverZone($event, 'composer')"
+        @dragleave="onDragLeaveZone($event, 'composer')"
+        @drop.capture="onDropZone($event, 'composer')"
+      >
+        <div
+          v-if="dragOverZone === 'composer' && vision"
+          class="drop-overlay drop-overlay--composer"
+          aria-hidden="true"
+        >
+          {{ dropUploading ? t('upload.uploading') : t('chat.drop_images') }}
+        </div>
+        <div class="composer-inner">
+          <div class="composer-grow">
+            <div class="composer-field" :class="{ 'composer-field--solo': !vision }">
+              <ImageUpload
+                v-if="vision"
+                variant="icon"
+                :disabled="thinking"
+                @uploaded="onImagesUploaded"
+                @error="onUploadError"
+              />
+              <div class="composer-input-col">
+                <textarea
+                  v-model="draft"
+                  rows="3"
+                  class="input"
+                  :placeholder="t('chat.placeholder')"
+                  @keydown="onKeydown"
+                />
+                <p v-if="uploadHint" class="composer-feedback warn">{{ uploadHint }}</p>
+                <p v-else-if="!vision" class="composer-feedback composer-hint">
+                  {{ t('chat.vision_only') }}
+                </p>
+              </div>
+            </div>
+          </div>
+          <button class="send" type="button" :disabled="thinking || !modelId" @click="send">
+            {{ t('chat.send') }}
+          </button>
+        </div>
       </div>
     </main>
   </div>
@@ -702,52 +786,6 @@ async function send() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.system-block {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface-2);
-}
-.system-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.system-hint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-.system-input {
-  width: 100%;
-  resize: vertical;
-  min-height: 100px;
-  max-height: 240px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 11px;
-  background: var(--surface);
-  outline: none;
-  line-height: 1.45;
-  font-size: 13px;
-}
-.btn-linkish {
-  justify-self: start;
-  border: 0;
-  background: none;
-  padding: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 .rag {
   display: flex;
@@ -947,16 +985,6 @@ async function send() {
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
   color: #fff;
 }
-.hint,
-.warn {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.4;
-}
-.warn {
-  color: var(--danger);
-}
 .main {
   display: grid;
   grid-template-rows: 1fr auto auto;
@@ -970,6 +998,80 @@ async function send() {
   min-height: 0;
   overflow: auto;
   padding: 20px 20px 12px;
+  position: relative;
+}
+.drop-zone {
+  position: relative;
+}
+.drop-zone--active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.drop-overlay {
+  position: absolute;
+  inset: 10px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  border: 2px dashed color-mix(in srgb, var(--accent) 60%, var(--border));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  pointer-events: none;
+}
+.drop-overlay--composer {
+  inset: 8px;
+  border-radius: 16px;
+  font-size: 13px;
+}
+.composer.drop-zone {
+  position: relative;
+}
+.composer-inner .input,
+.composer-inner .send {
+  position: relative;
+  z-index: 1;
+}
+.composer-inner {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+  min-width: 0;
+}
+.composer-grow {
+  min-width: 0;
+}
+.composer-input-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.composer-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+}
+.composer-field--solo {
+  grid-template-columns: 1fr;
+}
+.composer-feedback {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 0 2px;
+}
+.composer-hint {
+  color: var(--muted);
+}
+.composer-feedback.warn {
+  color: var(--danger);
 }
 .preview-strip {
   flex-shrink: 0;
@@ -1015,10 +1117,6 @@ async function send() {
   border-top: 1px solid var(--border);
   background: var(--surface);
   padding: 14px 20px 18px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: end;
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.04);
 }
 [data-theme='dark'] .composer {

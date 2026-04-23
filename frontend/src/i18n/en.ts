@@ -37,6 +37,8 @@ const messages = {
     thinking: 'Thinking…',
     attach_image: 'Add photos',
     image_message_placeholder: '(Photos attached — describe anything specific you want assessed.)',
+    drop_images: 'Drop images to attach',
+    max_images_reached: 'You already have the maximum number of photos (12). Remove one to add more.',
     remove_image: 'Remove',
     image_preview: 'Image preview',
     you: 'You',
@@ -56,10 +58,6 @@ const messages = {
     rename_save: 'Save',
     rename_cancel: 'Cancel',
     rename_placeholder: 'Chat title',
-    system_prompt_label: 'AI instructions',
-    system_prompt_hint:
-      'Sent to the model with every message. Stored only in this browser (local). Clear the box to disable.',
-    system_prompt_reset: 'Restore default',
     model_current: 'Model',
   },
   upload: {
