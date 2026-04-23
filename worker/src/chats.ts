@@ -15,7 +15,20 @@ type ChatMessageApiRow = {
   role: string
   content: string
   modelName: string | null
+  imageUrlsJson: string | null
   createdAt: number
+}
+
+function parseStoredImageUrls(raw: string | null): string[] | undefined {
+  if (!raw || !String(raw).trim()) return undefined
+  try {
+    const v = JSON.parse(String(raw)) as unknown
+    if (!Array.isArray(v)) return undefined
+    const urls = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    return urls.length ? urls : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function truncateTitle(text: string, max = 72): string {
@@ -101,12 +114,25 @@ export async function handleGetChatMessages(c: Context<{ Bindings: Env }>): Prom
     return c.json({ error: 'Chat not found' }, 404)
   }
   const { results } = await c.env.DB.prepare(
-    `SELECT id, role, content, model_name AS modelName, created_at AS createdAt
+    `SELECT id, role, content, model_name AS modelName, image_urls AS imageUrlsJson, created_at AS createdAt
      FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC, id ASC`
   )
     .bind(chatId)
     .all<ChatMessageApiRow>()
-  return c.json({ messages: results ?? [] })
+  const rows = results ?? []
+  return c.json({
+    messages: rows.map((r) => {
+      const imageUrls = parseStoredImageUrls(r.imageUrlsJson)
+      return {
+        id: r.id,
+        role: r.role,
+        content: r.content,
+        modelName: r.modelName,
+        ...(imageUrls ? { imageUrls } : {}),
+        createdAt: r.createdAt,
+      }
+    }),
+  })
 }
 
 export async function handleUpdateChat(c: Context<{ Bindings: Env }>): Promise<Response> {
@@ -155,13 +181,14 @@ export async function insertUserMessage(
   chatId: string,
   id: string,
   content: string,
-  createdAt: number
+  createdAt: number,
+  imageUrlsJson: string | null = null
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO chat_messages (id, chat_id, role, content, model_name, created_at) VALUES (?, ?, 'user', ?, NULL, ?)`
+      `INSERT INTO chat_messages (id, chat_id, role, content, model_name, image_urls, created_at) VALUES (?, ?, 'user', ?, NULL, ?, ?)`
     )
-    .bind(id, chatId, content, createdAt)
+    .bind(id, chatId, content, imageUrlsJson, createdAt)
     .run()
 }
 
@@ -180,7 +207,7 @@ export async function finalizeExchange(
   await db.batch([
     db
       .prepare(
-        `INSERT INTO chat_messages (id, chat_id, role, content, model_name, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)`
+        `INSERT INTO chat_messages (id, chat_id, role, content, model_name, image_urls, created_at) VALUES (?, ?, 'assistant', ?, ?, NULL, ?)`
       )
       .bind(
         params.assistantMessageId,

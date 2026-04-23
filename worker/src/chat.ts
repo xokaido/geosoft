@@ -378,7 +378,8 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
 
     const userMsgId = crypto.randomUUID()
     const userNow = Date.now()
-    await insertUserMessage(c.env.DB, chatId, userMsgId, userTextForDb, userNow)
+    const userImageUrlsJson = rawUrls.length > 0 ? JSON.stringify(rawUrls) : null
+    await insertUserMessage(c.env.DB, chatId, userMsgId, userTextForDb, userNow, userImageUrlsJson)
 
     const meta = getModelMeta(model)
     const assistantModelName = meta?.name ?? meta?.slug ?? model

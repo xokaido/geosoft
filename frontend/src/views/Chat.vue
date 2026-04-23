@@ -131,6 +131,7 @@ async function loadMessages(chatId: string) {
       role: 'user' | 'assistant'
       content: string
       modelName?: string | null
+      imageUrls?: string[]
     }>
   }
   if (chatId !== activeChatId.value) return
@@ -141,6 +142,7 @@ async function loadMessages(chatId: string) {
     role: m.role,
     content: m.content,
     modelName: m.modelName ?? undefined,
+    imageUrls: m.imageUrls?.length ? [...m.imageUrls] : undefined,
   }))
 }
 
