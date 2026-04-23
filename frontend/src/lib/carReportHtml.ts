@@ -154,6 +154,22 @@ function gradeTone(letter: string): 'good' | 'ok' | 'warn' | 'bad' {
   return 'bad'
 }
 
+/**
+ * Extract any trailing parenthetical explanation from the value so we can show
+ * a compact pill ("N/A" or "7/10") and display the note on its own line.
+ * Also handles bracketed notes without parens like "N/A — not visible".
+ */
+function splitValueAndNote(value: string): { pill: string; note: string } {
+  const raw = value.replace(/\*+/g, '').trim()
+  // Parenthetical: "N/A (reason)" → pill: "N/A", note: "reason"
+  const paren = raw.match(/^([^()]+?)\s*\(\s*([^)]+?)\s*\)\s*$/)
+  if (paren) return { pill: paren[1].trim(), note: paren[2].trim() }
+  // Dash-separated: "N/A — reason" / "N/A - reason"
+  const dash = raw.match(/^(N\/?A|\d{1,2}\s*\/\s*10|\d{1,2})\s*[–—-]\s*(.+)$/i)
+  if (dash) return { pill: dash[1].trim(), note: dash[2].trim() }
+  return { pill: raw, note: '' }
+}
+
 function formatMetricBlock(line: string): string {
   const cleaned = stripLeadingListMarker(line).trim()
   if (!cleaned) return ''
@@ -176,29 +192,29 @@ function formatMetricBlock(line: string): string {
   if (!isScoreValue(valuePart)) return ''
   if (!/N\/?A/i.test(valuePart) && !SCORE_LABEL_RE.test(nameClean)) return ''
 
-  const na = /N\/?A/i.test(valuePart)
+  const { pill: pillRaw, note } = splitValueAndNote(valuePart)
+  const na = /N\/?A/i.test(pillRaw)
   let num = 0
   if (!na) {
-    const digits = valuePart.replace(/\*+/g, '').trim()
-    const s10 = digits.match(/^(\d{1,2})\s*\/\s*10$/)
-    const s1 = digits.match(/^(10|[0-9])$/)
+    const s10 = pillRaw.match(/^(\d{1,2})\s*\/\s*10$/)
+    const s1 = pillRaw.match(/^(10|[0-9])$/)
     if (s10) num = Math.min(10, parseInt(s10[1], 10) || 0)
     else if (s1) num = Math.min(10, parseInt(s1[1], 10) || 0)
   }
   const pct = na ? 0 : num * 10
   const tone = na ? 'na' : scoreTone(num)
-  const valShow = na
-    ? valuePart.replace(/\*+/g, '').trim()
-    : /\/\s*10/.test(valuePart)
-      ? valuePart.replace(/\*+/g, '').trim()
-      : `${num}/10`
+  const pillShow = na ? 'N/A' : /\/\s*10/.test(pillRaw) ? pillRaw : `${num}/10`
+  const noteHtml = note
+    ? `<p class="cr-metric__note">${renderInline(note)}</p>`
+    : ''
   return [
     `<div class="cr-metric" data-tone="${tone}" ${na ? 'data-na="1"' : ''} style="--cr-metric-pct: ${pct}">`,
     `<div class="cr-metric__row">`,
     `<span class="cr-metric__name">${renderInline(nameClean)}</span>`,
-    `<span class="cr-metric__val">${renderInline(valShow)}</span>`,
+    `<span class="cr-metric__val">${renderInline(pillShow)}</span>`,
     `</div>`,
     `<div class="cr-metric__track" role="presentation"><div class="cr-metric__fill"></div></div>`,
+    noteHtml,
     `</div>`,
   ].join('')
 }

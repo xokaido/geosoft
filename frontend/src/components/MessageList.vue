@@ -526,8 +526,23 @@ function userThumbs(m: UiMsg): string[] {
   background: color-mix(in srgb, var(--cr-tone-2, var(--accent)) 12%, transparent);
   padding: 3px 10px;
   border-radius: 999px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.3;
+}
+.md--report :deep(.cr-metric__note) {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.md--report :deep(.cr-metric[data-tone='na'] .cr-metric__note) {
+  color: var(--cr-na-fg);
 }
 .md--report :deep(.cr-metric__track) {
   height: 8px;
