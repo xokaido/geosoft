@@ -410,7 +410,7 @@ async function send() {
   const text = draft.value.trim()
   const hasImages = vision.value && imageUrls.value.length > 0
   if ((!text && !hasImages) || !modelId.value) return
-  const outboundText = text || t('chat.image_message_placeholder')
+  const outboundText = text
   const savedImageUrls = [...imageUrls.value]
   if (!(await ensureActiveChat())) {
     uploadHint.value = t('chat.chat_create_error')
@@ -443,6 +443,7 @@ async function send() {
     chatId: activeChatId.value,
     messages: payloadMessages,
     useRag: useRag.value,
+    uiLanguage: locale.value,
   }
   if (imageUrls.value.length && vision.value) {
     body.imageUrls = [...imageUrls.value]
@@ -696,6 +697,9 @@ async function send() {
                   @keydown="onKeydown"
                 />
                 <p v-if="uploadHint" class="composer-feedback warn">{{ uploadHint }}</p>
+                <p v-else-if="vision && imageUrls.length" class="composer-feedback composer-hint">
+                  {{ t('chat.prompt_optional_hint') }}
+                </p>
                 <p v-else-if="!vision" class="composer-feedback composer-hint">
                   {{ t('chat.vision_only') }}
                 </p>

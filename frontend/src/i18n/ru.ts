@@ -2,7 +2,7 @@ import type { Messages } from './en'
 
 const messages: Messages = {
   app: {
-    title: 'GeoSoft AI Чат',
+    title: 'GeoSoft Cloud Чат',
   },
   login: {
     title: 'Вход',
@@ -39,6 +39,7 @@ const messages: Messages = {
     thinking: 'Думает...',
     attach_image: 'Добавить фото',
     image_message_placeholder: '(Фото прикреплены — уточните, что именно оценить.)',
+    prompt_optional_hint: 'Необязательно: добавьте, что именно нужно оценить.',
     drop_images: 'Отпустите изображения, чтобы прикрепить',
     max_images_reached: 'Уже максимум фото (12). Удалите одно, чтобы добавить ещё.',
     remove_image: 'Удалить изображение',

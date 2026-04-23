@@ -1,6 +1,6 @@
 const messages = {
   app: {
-    title: 'GeoSoft AI Chat',
+    title: 'GeoSoft Cloud Chat',
   },
   login: {
     title: 'Sign In',
@@ -37,6 +37,7 @@ const messages = {
     thinking: 'Thinking…',
     attach_image: 'Add photos',
     image_message_placeholder: '(Photos attached — describe anything specific you want assessed.)',
+    prompt_optional_hint: 'Optional: add a note about what you want assessed.',
     drop_images: 'Drop images to attach',
     max_images_reached: 'You already have the maximum number of photos (12). Remove one to add more.',
     remove_image: 'Remove',

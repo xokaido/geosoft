@@ -2,7 +2,7 @@ import type { Messages } from './en'
 
 const messages: Messages = {
   app: {
-    title: 'GeoSoft AI ჩეთი',
+    title: 'GeoSoft Cloud ჩეთი',
   },
   login: {
     title: 'შესვლა',
@@ -39,6 +39,7 @@ const messages: Messages = {
     thinking: 'ფიქრობს...',
     attach_image: 'ფოტოების დამატება',
     image_message_placeholder: '(ფოტოები მიმაგრებულია — დაწერეთ რა გსურთ შეფასდეს.)',
+    prompt_optional_hint: 'სურვილისამებრ: მიუთითეთ, რას გსურთ შეფასება.',
     drop_images: 'გადააგდეთ სურათები მისაბმელად',
     max_images_reached: 'უკვე გაქვთ მაქსიმალური რაოდენობის ფოტო (12). წაშალეთ ერთი, რომ დაამატოთ.',
     remove_image: 'სურათის წაშლა',
