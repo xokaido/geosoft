@@ -147,7 +147,8 @@ function userThumbs(m: UiMsg): string[] {
 }
 .row.assistant {
   margin-right: auto;
-  justify-items: start;
+  /* stretch = full column width; `start` shrinks the bubble to content min-width and breaks nested layout */
+  justify-items: stretch;
 }
 .meta {
   font-size: 12px;
@@ -155,12 +156,23 @@ function userThumbs(m: UiMsg): string[] {
   padding: 0 6px;
 }
 .bubble {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px 14px;
   white-space: pre-wrap;
   line-height: 1.45;
   box-shadow: var(--shadow);
+  box-sizing: border-box;
+}
+.assistant .bubble {
+  width: 100%;
+  max-width: 100%;
+  background: var(--assistant-bubble);
+}
+.user .bubble {
+  max-width: min(100%, 560px);
+  background: var(--user-bubble);
 }
 .bubble.has-media {
   display: flex;
@@ -245,12 +257,6 @@ function userThumbs(m: UiMsg): string[] {
 [data-theme='dark'] .text.md :deep(.grade-F) {
   color: #fca5a5;
 }
-.user .bubble {
-  background: var(--user-bubble);
-}
-.assistant .bubble {
-  background: var(--assistant-bubble);
-}
 .bubble--report {
   max-width: min(100%, 640px);
   padding: 16px 18px 18px;
@@ -258,7 +264,7 @@ function userThumbs(m: UiMsg): string[] {
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, var(--surface) 92%, var(--accent) 8%)) 0%,
+    color-mix(in srgb, var(--surface) 92%, var(--accent) 8%) 0%,
     var(--assistant-bubble) 48%
   );
   box-shadow:
@@ -266,13 +272,23 @@ function userThumbs(m: UiMsg): string[] {
     0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .md--report {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   font-size: 15px;
   line-height: 1.58;
+  overflow-wrap: break-word;
+  word-break: normal;
+  word-wrap: break-word;
 }
 .md--report :deep(.cr-report) {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.md--report :deep(.cr-para) {
+  overflow-wrap: break-word;
 }
 .md--report :deep(.cr-gap) {
   height: 10px;
@@ -319,6 +335,7 @@ function userThumbs(m: UiMsg): string[] {
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.04em;
+  color: var(--text);
 }
 .md--report :deep(.cr-verdict__sub) {
   margin: 4px 0 0;
@@ -374,22 +391,26 @@ function userThumbs(m: UiMsg): string[] {
 }
 .md--report :deep(.cr-metric__row) {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
   margin-bottom: 8px;
+  min-width: 0;
 }
 .md--report :deep(.cr-metric__name) {
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
+  min-width: 0;
+  flex: 1 1 120px;
 }
 .md--report :deep(.cr-metric__val) {
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 .md--report :deep(.cr-metric__track) {
   height: 8px;
@@ -405,6 +426,10 @@ function userThumbs(m: UiMsg): string[] {
   transition: width 0.35s ease;
 }
 .md--report :deep(.cr-bullets) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin: 8px 0 12px;
   padding: 12px 14px 12px 12px;
   border-radius: 14px;
@@ -414,9 +439,15 @@ function userThumbs(m: UiMsg): string[] {
 }
 .md--report :deep(.cr-bullets__item) {
   position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
   padding: 6px 0 6px 18px;
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
 }
 .md--report :deep(.cr-bullets__item + .cr-bullets__item) {
   border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
