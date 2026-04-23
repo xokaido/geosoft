@@ -305,7 +305,7 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
           'You are a helpful, friendly assistant for GeoSoft (geosoft.ge), the Georgian cloud & workplace technology partner. The user enabled the geosoft.ge knowledge base.\n' +
           'Answer using the retrieved passages below for factual claims about the company, products, and site content. ' +
           'When you use a fact from a passage, mention its source number (e.g. Source 1). ' +
-          'If something is not in the passages, say so honestly; prefer the same language as the user when natural.\n\n' +
+          'If something is not in the passages, say so honestly. Write the entire answer in the same language as the user’s latest message (Georgian → Georgian, Russian → Russian, etc.); do not switch to English unless the user wrote in English.\n\n' +
           ragBlock,
       })
     } else {
@@ -315,12 +315,19 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
           'You are a warm, professional assistant for GeoSoft (geosoft.ge), the Georgian cloud & workplace technology partner.\n' +
           'The live site index did not return matching snippets for this question, but you must still answer helpfully using ONLY the approved overview below. ' +
           'Do not invent prices, contract terms, or SKU-level catalog details not stated there. ' +
-          'Answer in the same language as the user (e.g. Georgian for Georgian). Be concise, friendly, and invite them to visit geosoft.ge or contact GeoSoft for specifics.\n' +
+          'Write your entire answer in the same language as the user’s latest message (Georgian → Georgian only, Russian → Russian only, etc.). Be concise, friendly, and invite them to visit geosoft.ge or contact GeoSoft for specifics.\n' +
           'Do not open with a harsh refusal — acknowledge the question and give useful orientation.\n\n' +
           geosoftAssistantFallbackContext(),
       })
     }
   }
+
+  outMessages.push({
+    role: 'system',
+    content:
+      'Output language: Match the user’s latest message. Write the full reply in that language only (e.g. ქართული prompt → ქართული პასუხი მთლიანად). Do not answer in English when the user wrote Georgian, Russian, or another non-English language. English is allowed only if the user’s message is English or they explicitly request English.',
+  })
+
   for (const m of messages) {
     if (m.role === 'user' && imageDataUrls.length && m === messages[messages.length - 1]) {
       const text = typeof m.content === 'string' ? m.content : lastUserQuery([m])
