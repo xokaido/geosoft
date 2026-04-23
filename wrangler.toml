@@ -2,6 +2,11 @@ name = "geosoft"
 main = "worker/src/index.ts"
 compatibility_date = "2024-09-23"
 
+# Custom hostname (zone kadri.ge must be on Cloudflare; deploy creates SSL + routing).
+[[routes]]
+pattern = "car.kadri.ge"
+custom_domain = true
+
 # Bundle markdown as string imports (e.g. chat system prompt).
 [[rules]]
 type = "Text"
