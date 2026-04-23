@@ -814,9 +814,9 @@ function userThumbs(m: UiMsg): string[] {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  border: 1px solid var(--border, #334155);
-  background: var(--surface, #111827);
-  color: var(--text, #e5e7eb);
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
   font-size: 28px;
   line-height: 1;
   cursor: pointer;
@@ -839,10 +839,13 @@ function userThumbs(m: UiMsg): string[] {
   padding: 6px 14px;
   border-radius: 999px;
   font-size: 13px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--text, #e5e7eb);
-  background: rgba(17, 24, 39, 0.85);
-  border: 1px solid var(--border, #334155);
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.55);
 }
 .lightbox-close {
   position: fixed;
@@ -852,9 +855,9 @@ function userThumbs(m: UiMsg): string[] {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  border: 1px solid var(--border, #334155);
-  background: var(--surface, #111827);
-  color: var(--text, #e5e7eb);
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
   font-size: 24px;
   line-height: 1;
   cursor: pointer;
