@@ -9,9 +9,13 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  uploaded: [url: string]
+  uploaded: [urls: string[]]
   error: [message: string]
 }>()
+
+const MAX_FILES = 12
+const MAX_BYTES = 10 * 1024 * 1024
+const OK_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
 const uploading = ref(false)
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -23,33 +27,39 @@ function open() {
 
 async function onPick(e: Event) {
   const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
+  const picked = input.files ? Array.from(input.files) : []
   input.value = ''
-  if (!file) return
-  const okTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-  if (!okTypes.includes(file.type)) {
-    emit('error', t('upload.invalid_type'))
-    return
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    emit('error', t('upload.too_large'))
-    return
+  if (!picked.length) return
+  const files = picked.slice(0, MAX_FILES)
+  for (const file of files) {
+    if (!OK_TYPES.includes(file.type)) {
+      emit('error', t('upload.invalid_type'))
+      return
+    }
+    if (file.size > MAX_BYTES) {
+      emit('error', t('upload.too_large'))
+      return
+    }
   }
   uploading.value = true
   try {
-    const fd = new FormData()
-    fd.set('file', file)
-    const r = await fetch('/api/upload', { method: 'POST', body: fd, credentials: 'include' })
-    if (!r.ok) {
-      emit('error', t('upload.error'))
-      return
+    const urls: string[] = []
+    for (const file of files) {
+      const fd = new FormData()
+      fd.set('file', file)
+      const r = await fetch('/api/upload', { method: 'POST', body: fd, credentials: 'include' })
+      if (!r.ok) {
+        emit('error', t('upload.error'))
+        return
+      }
+      const j = (await r.json()) as { url?: string }
+      if (!j.url) {
+        emit('error', t('upload.error'))
+        return
+      }
+      urls.push(j.url)
     }
-    const j = (await r.json()) as { url?: string }
-    if (!j.url) {
-      emit('error', t('upload.error'))
-      return
-    }
-    emit('uploaded', j.url)
+    if (urls.length) emit('uploaded', urls)
   } catch {
     emit('error', t('upload.error'))
   } finally {
@@ -64,6 +74,7 @@ async function onPick(e: Event) {
       ref="inputRef"
       class="hidden"
       type="file"
+      multiple
       accept="image/jpeg,image/png,image/webp,image/gif"
       @change="onPick"
     />

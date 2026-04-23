@@ -9,6 +9,8 @@ export type UiMsg = {
   modelName?: string
   /** Image shown in-thread (e.g. `/api/image/...`); retained after send. */
   imageUrl?: string | null
+  /** Multiple images for one user turn */
+  imageUrls?: string[]
 }
 
 defineProps<{
@@ -45,6 +47,32 @@ function openLightbox(url: string) {
 function closeLightbox() {
   lightboxUrl.value = null
 }
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+/** Minimal safe formatting for assistant replies (bold + overall grade highlight). */
+function assistantHtml(raw: string): string {
+  let s = escapeHtml(raw)
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  s = s.replace(/(^|\n)(Overall\s*grade\s*:\s*)([A-Fa-f])(?=\s|$|[\n\r\(\[,])/g, (_m, lead, prefix, letter) => {
+    const L = letter.toUpperCase()
+    return `${lead}${prefix}<span class="ov-grade grade-${L}">${L}</span>`
+  })
+  return s.replace(/\n/g, '<br />')
+}
+
+function userThumbs(m: UiMsg): string[] {
+  if (m.imageUrls?.length) return m.imageUrls
+  if (m.imageUrl) return [m.imageUrl]
+  return []
+}
 </script>
 
 <template>
@@ -58,17 +86,21 @@ function closeLightbox() {
       :class="m.role === 'user' ? 'user' : 'assistant'"
     >
       <div class="meta">{{ m.role === 'user' ? t('chat.you') : m.modelName || t('chat.assistant') }}</div>
-      <div class="bubble" :class="{ 'has-media': m.role === 'user' && m.imageUrl }">
-        <button
-          v-if="m.role === 'user' && m.imageUrl"
-          type="button"
-          class="img-btn"
-          :aria-label="t('chat.image_enlarge')"
-          @click="openLightbox(m.imageUrl!)"
-        >
-          <img :src="m.imageUrl" class="thumb" alt="" />
-        </button>
-        <div v-if="m.content" class="text">{{ m.content }}</div>
+      <div class="bubble" :class="{ 'has-media': m.role === 'user' && userThumbs(m).length }">
+        <div v-if="m.role === 'user' && userThumbs(m).length" class="thumb-grid">
+          <button
+            v-for="(src, i) in userThumbs(m)"
+            :key="`${m.id}-img-${i}`"
+            type="button"
+            class="img-btn"
+            :aria-label="t('chat.image_enlarge')"
+            @click="openLightbox(src)"
+          >
+            <img :src="src" class="thumb" alt="" />
+          </button>
+        </div>
+        <div v-if="m.role === 'assistant'" class="text md" v-html="assistantHtml(m.content)" />
+        <div v-else-if="m.content" class="text">{{ m.content }}</div>
       </div>
     </div>
 
@@ -140,6 +172,12 @@ function closeLightbox() {
   gap: 10px;
   align-items: stretch;
 }
+.thumb-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
 .img-btn {
   display: block;
   padding: 0;
@@ -161,6 +199,55 @@ function closeLightbox() {
 }
 .text {
   white-space: pre-wrap;
+}
+.text.md {
+  white-space: normal;
+  line-height: 1.55;
+}
+.text.md :deep(strong) {
+  font-weight: 700;
+  color: var(--text);
+}
+.text.md :deep(.ov-grade) {
+  font-weight: 800;
+  font-size: 1.15em;
+  letter-spacing: 0.02em;
+}
+.text.md :deep(.grade-A) {
+  color: #16a34a;
+}
+.text.md :deep(.grade-B) {
+  color: #22c55e;
+}
+.text.md :deep(.grade-C) {
+  color: #ca8a04;
+}
+.text.md :deep(.grade-D) {
+  color: #ea580c;
+}
+.text.md :deep(.grade-E) {
+  color: #dc2626;
+}
+.text.md :deep(.grade-F) {
+  color: #b91c1c;
+}
+[data-theme='dark'] .text.md :deep(.grade-A) {
+  color: #4ade80;
+}
+[data-theme='dark'] .text.md :deep(.grade-B) {
+  color: #86efac;
+}
+[data-theme='dark'] .text.md :deep(.grade-C) {
+  color: #facc15;
+}
+[data-theme='dark'] .text.md :deep(.grade-D) {
+  color: #fb923c;
+}
+[data-theme='dark'] .text.md :deep(.grade-E) {
+  color: #f87171;
+}
+[data-theme='dark'] .text.md :deep(.grade-F) {
+  color: #fca5a5;
 }
 .user .bubble {
   background: var(--user-bubble);

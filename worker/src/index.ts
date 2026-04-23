@@ -12,6 +12,7 @@ import {
   handleDeleteChat,
   handleGetChatMessages,
   handleListChats,
+  handleUpdateChat,
 } from './chats'
 import { MODELS } from './models'
 import { ingestGeosoftToVectorize } from './rag'
@@ -25,7 +26,7 @@ app.use(
   cors({
     origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
     allowHeaders: ['Content-Type', 'Authorization'],
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   })
 )
@@ -57,6 +58,7 @@ api.get('/models', (c) => c.json(MODELS))
 api.get('/chats', (c) => handleListChats(c))
 api.post('/chats', (c) => handleCreateChat(c))
 api.get('/chats/:id/messages', (c) => handleGetChatMessages(c))
+api.patch('/chats/:id', (c) => handleUpdateChat(c))
 api.delete('/chats/:id', (c) => handleDeleteChat(c))
 api.post('/upload', (c) => handleUpload(c))
 api.get('/image/:key', (c) => handleImage(c))

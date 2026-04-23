@@ -16,7 +16,7 @@ export const MODELS: ChatModelMeta[] = [
   {
     id: 'google/gemini-3-flash-preview',
     slug: 'gemini-3-flash-preview',
-    name: 'Gemini 3 Flash (preview)',
+    name: 'Gemini Fast',
     task: 'Google Gemini',
     vision: true,
     chatEligible: true,

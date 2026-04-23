@@ -66,12 +66,13 @@ async function loadImageFromR2(
   return { dataUrl: `data:${mime};base64,${b64}` }
 }
 
-function buildUserContent(text: string, imageDataUrl: string | null): string | unknown[] {
-  if (!imageDataUrl) return text
-  return [
-    { type: 'text', text },
-    { type: 'image_url', image_url: { url: imageDataUrl } },
-  ]
+function buildUserContent(text: string, imageDataUrls: string[]): string | unknown[] {
+  if (!imageDataUrls.length) return text
+  const parts: unknown[] = [{ type: 'text', text }]
+  for (const url of imageDataUrls) {
+    parts.push({ type: 'image_url', image_url: { url } })
+  }
+  return parts
 }
 
 /** Workers AI SSE is line-oriented (`data: {...}\\n`). `response` is often cumulative, not a per-chunk delta. */
@@ -221,8 +222,10 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     model?: string
     messages?: ChatMessage[]
     imageUrl?: string
+    imageUrls?: string[]
     useRag?: boolean
     chatId?: string
+    systemPrompt?: string
   }
   try {
     body = await c.req.json()
@@ -264,18 +267,40 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   const hasRagContext = ragBlock.trim().length > 0
 
   const vision = isVisionModel(model)
-  let imageDataUrl: string | null = null
-  if (body.imageUrl) {
+  const rawUrls: string[] = []
+  if (Array.isArray(body.imageUrls) && body.imageUrls.length) {
+    for (const u of body.imageUrls) {
+      if (typeof u === 'string' && u.trim()) rawUrls.push(u.trim())
+    }
+  } else if (body.imageUrl && typeof body.imageUrl === 'string' && body.imageUrl.trim()) {
+    rawUrls.push(body.imageUrl.trim())
+  }
+  if (rawUrls.length > 12) {
+    return c.json({ error: 'Too many images (max 12)' }, 400)
+  }
+  const imageDataUrls: string[] = []
+  if (rawUrls.length) {
     if (!vision) {
       return c.json({ error: 'Model does not support images' }, 400)
     }
-    imageDataUrl = (await loadImageFromR2(c.env, body.imageUrl))?.dataUrl ?? null
-    if (!imageDataUrl) {
-      return c.json({ error: 'Image not found' }, 404)
+    for (const url of rawUrls) {
+      const dataUrl = (await loadImageFromR2(c.env, url))?.dataUrl ?? null
+      if (!dataUrl) {
+        return c.json({ error: 'One or more images were not found' }, 404)
+      }
+      imageDataUrls.push(dataUrl)
     }
   }
 
+  const userSystem =
+    typeof body.systemPrompt === 'string' && body.systemPrompt.trim().length
+      ? body.systemPrompt.trim()
+      : ''
+
   const outMessages: ChatMessage[] = []
+  if (userSystem) {
+    outMessages.push({ role: 'system', content: userSystem })
+  }
   if (ragOn) {
     if (hasRagContext) {
       outMessages.push({
@@ -301,9 +326,9 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     }
   }
   for (const m of messages) {
-    if (m.role === 'user' && imageDataUrl && m === messages[messages.length - 1]) {
+    if (m.role === 'user' && imageDataUrls.length && m === messages[messages.length - 1]) {
       const text = typeof m.content === 'string' ? m.content : lastUserQuery([m])
-      outMessages.push({ role: 'user', content: buildUserContent(text, imageDataUrl) })
+      outMessages.push({ role: 'user', content: buildUserContent(text, imageDataUrls) })
     } else {
       outMessages.push(m)
     }

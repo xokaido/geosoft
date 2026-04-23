@@ -109,6 +109,32 @@ export async function handleGetChatMessages(c: Context<{ Bindings: Env }>): Prom
   return c.json({ messages: results ?? [] })
 }
 
+export async function handleUpdateChat(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const userId = c.get('session').username
+  const chatId = c.req.param('id')
+  if (!chatId) {
+    return c.json({ error: 'Missing chat id' }, 400)
+  }
+  let body: { title?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  const raw = body.title
+  const title = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ').slice(0, 200) : ''
+  const now = Date.now()
+  const res = await c.env.DB.prepare(
+    `UPDATE chats SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+  )
+    .bind(title, now, chatId, userId)
+    .run()
+  if (!res.success || (res.meta?.changes ?? 0) < 1) {
+    return c.json({ error: 'Chat not found' }, 404)
+  }
+  return c.json({ ok: true, title })
+}
+
 export async function handleDeleteChat(c: Context<{ Bindings: Env }>): Promise<Response> {
   const userId = c.get('session').username
   const chatId = c.req.param('id')

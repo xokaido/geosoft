@@ -5,9 +5,14 @@ import ImageUpload from '../components/ImageUpload.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import MessageList, { type UiMsg } from '../components/MessageList.vue'
 import ModelSelector, { type UiModel } from '../components/ModelSelector.vue'
+import { CAR_INSPECTOR_DEFAULT_SYSTEM_PROMPT } from '../constants/car-inspector-prompt'
 import { useI18n } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
+
+const GEMINI_FAST_MODEL_ID = 'google/gemini-3-flash-preview'
+const SYSTEM_PROMPT_STORAGE_KEY = 'geosoft-chat-system-prompt'
+const MAX_IMAGES = 12
 
 const router = useRouter()
 const { t, locale } = useI18n()
@@ -20,8 +25,11 @@ const modelsLoading = ref(true)
 const modelId = ref('')
 const useRag = ref(false)
 const draft = ref('')
-const imageUrl = ref<string | null>(null)
+const imageUrls = ref<string[]>([])
 const uploadHint = ref('')
+const systemPrompt = ref('')
+const renameChatId = ref<string | null>(null)
+const renameDraft = ref('')
 
 type ApiChat = { id: string; modelId: string; title: string; createdAt: number; updatedAt: number }
 const chats = ref<ApiChat[]>([])
@@ -55,8 +63,11 @@ onMounted(async () => {
     }
     const data = (await r.json()) as UiModel[]
     models.value = data
+    const fast = data.find((m) => m.id === GEMINI_FAST_MODEL_ID && m.chatEligible)
     const firstChat = data.find((m) => m.chatEligible)
-    modelId.value = firstChat?.id ?? data[0]?.id ?? ''
+    modelId.value = fast?.id ?? firstChat?.id ?? data[0]?.id ?? ''
+    const savedPrompt = localStorage.getItem(SYSTEM_PROMPT_STORAGE_KEY)
+    systemPrompt.value = savedPrompt === null ? CAR_INSPECTOR_DEFAULT_SYSTEM_PROMPT : savedPrompt
   } finally {
     modelsLoading.value = false
   }
@@ -70,6 +81,18 @@ watch(
   },
   { flush: 'post' }
 )
+
+watch(systemPrompt, (v) => {
+  try {
+    localStorage.setItem(SYSTEM_PROMPT_STORAGE_KEY, v)
+  } catch {
+    /* ignore quota */
+  }
+})
+
+function resetSystemPrompt() {
+  systemPrompt.value = CAR_INSPECTOR_DEFAULT_SYSTEM_PROMPT
+}
 
 async function loadChats() {
   if (!modelId.value) return
@@ -93,7 +116,14 @@ async function loadMessages(chatId: string) {
   const r = await fetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
     credentials: 'include',
   })
-  if (!r.ok) return
+  if (chatId !== activeChatId.value) return
+  if (!r.ok) {
+    uploadHint.value = t('chat.load_history_error')
+    setTimeout(() => {
+      uploadHint.value = ''
+    }, 5000)
+    return
+  }
   const data = (await r.json()) as {
     messages: Array<{
       id: string
@@ -102,6 +132,7 @@ async function loadMessages(chatId: string) {
       modelName?: string | null
     }>
   }
+  if (chatId !== activeChatId.value) return
   const list = data.messages ?? []
   thread.value = list.map((m) => ({ role: m.role, content: m.content }))
   uiMessages.value = list.map((m) => ({
@@ -213,8 +244,48 @@ function onUploadError(msg: string) {
   }, 3500)
 }
 
-function removeImage() {
-  imageUrl.value = null
+function onImagesUploaded(urls: string[]) {
+  const next = [...imageUrls.value]
+  for (const u of urls) {
+    if (next.length >= MAX_IMAGES) break
+    next.push(u)
+  }
+  imageUrls.value = next
+}
+
+function removeImageAt(i: number) {
+  imageUrls.value = imageUrls.value.filter((_, idx) => idx !== i)
+}
+
+function openRename(c: ApiChat) {
+  renameChatId.value = c.id
+  renameDraft.value = c.title.trim() ? c.title : ''
+}
+
+function cancelRename() {
+  renameChatId.value = null
+  renameDraft.value = ''
+}
+
+async function saveRename() {
+  const id = renameChatId.value
+  if (!id) return
+  const title = renameDraft.value.trim().slice(0, 200)
+  const r = await fetch(`/api/chats/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ title }),
+  })
+  if (!r.ok) {
+    uploadHint.value = t('chat.error')
+    setTimeout(() => {
+      uploadHint.value = ''
+    }, 4000)
+    return
+  }
+  cancelRename()
+  await loadChats()
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -277,7 +348,10 @@ async function readTokenStream(resp: Response, onToken: (t: string) => void) {
 
 async function send() {
   const text = draft.value.trim()
-  if (!text || !modelId.value) return
+  const hasImages = vision.value && imageUrls.value.length > 0
+  if ((!text && !hasImages) || !modelId.value) return
+  const outboundText = text || t('chat.image_message_placeholder')
+  const savedImageUrls = [...imageUrls.value]
   if (!(await ensureActiveChat())) {
     uploadHint.value = t('chat.chat_create_error')
     setTimeout(() => {
@@ -286,22 +360,23 @@ async function send() {
     return
   }
 
-  const attachedImage = vision.value && imageUrl.value ? imageUrl.value : undefined
+  const attached = vision.value && imageUrls.value.length ? [...imageUrls.value] : []
   const userMsg: UiMsg = {
     id: crypto.randomUUID(),
     role: 'user',
-    content: text,
-    imageUrl: attachedImage,
+    content: outboundText,
+    imageUrls: attached.length ? attached : undefined,
   }
   uiMessages.value.push(userMsg)
 
   const modelName = selectedModel.value?.name ?? ''
   streamingModelName.value = modelName
 
-  const payloadMessages = [...thread.value, { role: 'user' as const, content: text }]
+  const payloadMessages = [...thread.value, { role: 'user' as const, content: outboundText }]
 
   draft.value = ''
   thinking.value = true
+  let clearUploadedImages = true
 
   const body: Record<string, unknown> = {
     model: modelId.value,
@@ -309,8 +384,10 @@ async function send() {
     messages: payloadMessages,
     useRag: useRag.value,
   }
-  if (imageUrl.value && vision.value) {
-    body.imageUrl = imageUrl.value
+  const sp = systemPrompt.value.trim()
+  if (sp) body.systemPrompt = sp
+  if (imageUrls.value.length && vision.value) {
+    body.imageUrls = [...imageUrls.value]
   }
 
   let assistantId: string | null = null
@@ -355,21 +432,23 @@ async function send() {
       })
     }
 
-    thread.value.push({ role: 'user', content: text })
+    thread.value.push({ role: 'user', content: outboundText })
     thread.value.push({ role: 'assistant', content: full })
     void loadChats()
   } catch {
     thinking.value = false
+    clearUploadedImages = false
     const idx = uiMessages.value.findIndex((m) => m.id === userMsg.id)
     if (idx >= 0) uiMessages.value.splice(idx, 1)
     draft.value = text
+    imageUrls.value = savedImageUrls
     uploadHint.value = t('chat.error')
     setTimeout(() => {
       uploadHint.value = ''
     }, 4500)
   } finally {
     thinking.value = false
-    imageUrl.value = null
+    if (clearUploadedImages) imageUrls.value = []
   }
 }
 </script>
@@ -377,7 +456,7 @@ async function send() {
 <template>
   <div class="shell">
     <button class="hamburger" type="button" @click="sidebarOpen = !sidebarOpen" aria-label="Menu">
-      ☰
+      <span class="hamburger-lines" aria-hidden="true" />
     </button>
 
     <aside class="sidebar" :class="{ open: sidebarOpen }">
@@ -386,14 +465,22 @@ async function send() {
       </div>
 
       <div v-if="modelsLoading" class="muted">{{ t('common.loading') }}</div>
-      <ModelSelector v-else v-model:model-id="modelId" :models="models" />
+      <template v-else>
+        <div class="model-wrap--hidden">
+          <ModelSelector v-model:model-id="modelId" :models="models" />
+        </div>
+        <div v-if="selectedModel" class="model-pill">
+          <span class="pill-k">{{ t('chat.model_current') }}</span>
+          <span class="pill-v">{{ selectedModel.name }}</span>
+        </div>
+      </template>
 
       <div v-if="!modelsLoading && modelId" class="sessions">
         <div class="sessions-head">
           <span class="sessions-title">{{ t('chat.sessions_title') }}</span>
           <button
             type="button"
-            class="ghost sm"
+            class="btn-new-chat"
             :disabled="thinking"
             :title="t('chat.new_session')"
             @click="createNewChat"
@@ -409,26 +496,75 @@ async function send() {
             class="session-row"
             :class="{ active: c.id === activeChatId }"
           >
-            <button type="button" class="session-main" @click="selectChat(c.id)">
-              <span class="session-title">{{
-                c.title.trim() ? c.title : t('chat.session_untitled')
-              }}</span>
-              <span class="session-meta">{{ formatChatDate(c.updatedAt) }}</span>
-            </button>
-            <button
-              type="button"
-              class="ghost danger sm icon"
-              :aria-label="t('chat.delete_session')"
-              :disabled="thinking"
-              @click.stop="deleteChatById(c.id)"
-            >
-              ×
-            </button>
+            <template v-if="renameChatId === c.id">
+              <div class="rename-box">
+                <input
+                  v-model="renameDraft"
+                  class="rename-input"
+                  type="text"
+                  maxlength="200"
+                  :placeholder="t('chat.rename_placeholder')"
+                  @keydown.enter.prevent="saveRename"
+                  @keydown.escape.prevent="cancelRename"
+                />
+                <div class="rename-actions">
+                  <button type="button" class="btn-tiny primary" @click="saveRename">
+                    {{ t('chat.rename_save') }}
+                  </button>
+                  <button type="button" class="btn-tiny" @click="cancelRename">
+                    {{ t('chat.rename_cancel') }}
+                  </button>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <button type="button" class="session-main" @click="selectChat(c.id)">
+                <span class="session-title">{{
+                  c.title.trim() ? c.title : t('chat.session_untitled')
+                }}</span>
+                <span class="session-meta">{{ formatChatDate(c.updatedAt) }}</span>
+              </button>
+              <div class="session-actions">
+                <button
+                  type="button"
+                  class="icon-btn"
+                  :aria-label="t('chat.rename_session')"
+                  :disabled="thinking"
+                  @click.stop="openRename(c)"
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  class="icon-btn danger"
+                  :aria-label="t('chat.delete_session')"
+                  :disabled="thinking"
+                  @click.stop="deleteChatById(c.id)"
+                >
+                  ×
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </div>
 
-      <label class="rag" :title="t('rag.tooltip')">
+      <div class="system-block">
+        <label class="system-label" for="sys-prompt">{{ t('chat.system_prompt_label') }}</label>
+        <p class="system-hint">{{ t('chat.system_prompt_hint') }}</p>
+        <textarea
+          id="sys-prompt"
+          v-model="systemPrompt"
+          class="system-input"
+          rows="5"
+          spellcheck="false"
+        />
+        <button type="button" class="btn-linkish" @click="resetSystemPrompt">
+          {{ t('chat.system_prompt_reset') }}
+        </button>
+      </div>
+
+      <label class="rag rag--hidden" :title="t('rag.tooltip')">
         <input v-model="useRag" type="checkbox" />
         <span>{{ t('rag.label') }}</span>
       </label>
@@ -449,7 +585,7 @@ async function send() {
       </div>
 
       <p v-if="!vision" class="hint">{{ t('chat.vision_only') }}</p>
-      <ImageUpload v-if="vision" :disabled="thinking" @uploaded="(u) => (imageUrl = u)" @error="onUploadError" />
+      <ImageUpload v-if="vision" :disabled="thinking" @uploaded="onImagesUploaded" @error="onUploadError" />
       <p v-if="uploadHint" class="warn">{{ uploadHint }}</p>
     </aside>
 
@@ -464,9 +600,13 @@ async function send() {
         />
       </div>
 
-      <div v-if="imageUrl && vision" class="preview">
-        <img :src="imageUrl" :alt="t('chat.image_preview')" />
-        <button type="button" class="x" @click="removeImage">{{ t('chat.remove_image') }}</button>
+      <div v-if="imageUrls.length && vision" class="preview-strip">
+        <div v-for="(src, i) in imageUrls" :key="src + i" class="preview-tile">
+          <img :src="src" :alt="t('chat.image_preview')" />
+          <button type="button" class="preview-x" :aria-label="t('chat.remove_image')" @click="removeImageAt(i)">
+            ×
+          </button>
+        </div>
       </div>
 
       <div class="composer">
@@ -492,34 +632,122 @@ async function send() {
   height: 100%;
   max-height: 100dvh;
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: minmax(300px, 360px) 1fr;
   position: relative;
   overflow: hidden;
+  background: var(--bg);
 }
 .sidebar {
   border-right: 1px solid var(--border);
   background: var(--surface);
-  padding: 16px;
+  padding: 18px 16px 20px;
   display: grid;
-  gap: 14px;
+  gap: 16px;
   align-content: start;
   height: 100%;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 .brand {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
 }
 .logo {
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  font-size: 1.05rem;
 }
 .muted {
   color: var(--muted);
   font-size: 13px;
+}
+.model-wrap--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.model-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.pill-k {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pill-v {
+  font-weight: 650;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.system-block {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.system-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.system-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.system-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 100px;
+  max-height: 240px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 11px;
+  background: var(--surface);
+  outline: none;
+  line-height: 1.45;
+  font-size: 13px;
+}
+.btn-linkish {
+  justify-self: start;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .rag {
   display: flex;
@@ -532,6 +760,17 @@ async function send() {
   font-size: 13px;
   line-height: 1.35;
 }
+.rag--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .row2 {
   display: grid;
   gap: 8px;
@@ -542,28 +781,25 @@ async function send() {
   border-radius: 12px;
   padding: 10px 10px;
   cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+.ghost:hover {
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
 }
 .ghost.icon {
   font-size: 18px;
   line-height: 1;
 }
-.ghost.sm {
-  padding: 6px 10px;
-  font-size: 12px;
-  border-radius: 10px;
-}
-.ghost.danger {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  color: var(--danger);
-}
 .sessions {
   display: grid;
   gap: 8px;
-  padding: 10px;
+  padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--surface-2);
-  max-height: 220px;
+  max-height: 260px;
   min-height: 0;
 }
 .sessions-head {
@@ -573,18 +809,36 @@ async function send() {
   gap: 8px;
 }
 .sessions-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+}
+.btn-new-chat {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.btn-new-chat:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.btn-new-chat:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .session-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   overflow: auto;
-  max-height: 160px;
+  max-height: 200px;
   padding-right: 2px;
 }
 .session-row {
@@ -592,12 +846,15 @@ async function send() {
   grid-template-columns: 1fr auto;
   gap: 4px;
   align-items: stretch;
-  border-radius: 10px;
+  border-radius: 11px;
   border: 1px solid transparent;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 .session-row.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 .session-main {
   display: grid;
@@ -605,10 +862,13 @@ async function send() {
   text-align: left;
   border: 0;
   background: transparent;
-  border-radius: 8px;
-  padding: 8px 8px;
+  border-radius: 9px;
+  padding: 9px 8px;
   cursor: pointer;
   min-width: 0;
+}
+.session-main:hover {
+  background: color-mix(in srgb, var(--surface) 65%, transparent);
 }
 .session-title {
   font-size: 13px;
@@ -622,11 +882,77 @@ async function send() {
   font-size: 11px;
   color: var(--muted);
 }
+.session-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 4px 4px 0;
+}
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--muted);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.icon-btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.rename-box {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+.rename-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  font-size: 13px;
+  outline: none;
+}
+.rename-actions {
+  display: flex;
+  gap: 8px;
+}
+.btn-tiny {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-tiny.primary {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  color: #fff;
+}
 .hint,
 .warn {
   margin: 0;
   font-size: 12px;
   color: var(--muted);
+  line-height: 1.4;
 }
 .warn {
   color: var(--danger);
@@ -638,70 +964,135 @@ async function send() {
   min-height: 0;
   height: 100%;
   overflow: hidden;
+  background: var(--bg);
 }
 .scroll {
   min-height: 0;
   overflow: auto;
-  padding: 14px 16px 10px;
+  padding: 20px 20px 12px;
 }
-.preview {
+.preview-strip {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 0 16px 10px;
+  padding: 0 20px 12px;
+  align-items: flex-start;
 }
-.preview img {
-  width: 72px;
-  height: 72px;
+.preview-tile {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+.preview-tile img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: 12px;
-  border: 1px solid var(--border);
+  display: block;
 }
-.x {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 12px;
-  padding: 8px 10px;
+.preview-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
   cursor: pointer;
+  display: grid;
+  place-items: center;
 }
 .composer {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--surface);
-  padding: 12px 16px 16px;
+  padding: 14px 20px 18px;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 10px;
+  gap: 12px;
   align-items: end;
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.04);
+}
+[data-theme='dark'] .composer {
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.35);
 }
 .input {
   width: 100%;
   resize: vertical;
-  min-height: 92px;
-  max-height: 220px;
+  min-height: 96px;
+  max-height: 240px;
   border: 1px solid var(--border);
   background: var(--surface-2);
-  border-radius: 14px;
-  padding: 12px 12px;
+  border-radius: 16px;
+  padding: 14px 14px;
   outline: none;
+  line-height: 1.5;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .send {
   border: 0;
   border-radius: 14px;
-  padding: 12px 14px;
-  height: 44px;
+  padding: 12px 18px;
+  min-height: 44px;
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
   color: white;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease;
+}
+.send:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.send:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .send:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .hamburger {
   display: none;
+}
+.hamburger-lines {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text);
+  position: relative;
+}
+.hamburger-lines::before,
+.hamburger-lines::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text);
+}
+.hamburger-lines::before {
+  top: -6px;
+}
+.hamburger-lines::after {
+  top: 6px;
 }
 .backdrop {
   display: none;
@@ -711,23 +1102,27 @@ async function send() {
     grid-template-columns: 1fr;
   }
   .hamburger {
-    display: inline-flex;
+    display: inline-grid;
+    place-items: center;
     position: absolute;
-    top: 10px;
-    left: 10px;
+    top: 12px;
+    left: 12px;
     z-index: 5;
     border: 1px solid var(--border);
     background: var(--surface);
     border-radius: 12px;
-    padding: 10px 12px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
     cursor: pointer;
+    box-shadow: var(--shadow);
   }
   .sidebar {
     position: fixed;
     z-index: 6;
-    width: min(92vw, 360px);
+    width: min(94vw, 380px);
     transform: translateX(-105%);
-    transition: transform 160ms ease;
+    transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: var(--shadow);
   }
   .sidebar.open {
@@ -737,11 +1132,12 @@ async function send() {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(2px);
     z-index: 4;
   }
   .main {
-    padding-top: 52px;
+    padding-top: 56px;
   }
 }
 </style>
