@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
+import { formatAssistantMessageHtml, isVehicleReportText } from '../lib/carReportHtml'
 import { useI18n } from '../i18n'
 
 export type UiMsg = {
@@ -48,24 +49,8 @@ function closeLightbox() {
   lightboxUrl.value = null
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-}
-
-/** Minimal safe formatting for assistant replies (bold + overall grade highlight). */
-function assistantHtml(raw: string): string {
-  let s = escapeHtml(raw)
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  s = s.replace(/(^|\n)(Overall\s*grade\s*:\s*)([A-Fa-f])(?=\s|$|[\n\r\(\[,])/g, (_m, lead, prefix, letter) => {
-    const L = letter.toUpperCase()
-    return `${lead}${prefix}<span class="ov-grade grade-${L}">${L}</span>`
-  })
-  return s.replace(/\n/g, '<br />')
+function assistantMessageHtml(content: string): string {
+  return formatAssistantMessageHtml(content)
 }
 
 function userThumbs(m: UiMsg): string[] {
@@ -86,7 +71,13 @@ function userThumbs(m: UiMsg): string[] {
       :class="m.role === 'user' ? 'user' : 'assistant'"
     >
       <div class="meta">{{ m.role === 'user' ? t('chat.you') : m.modelName || t('chat.assistant') }}</div>
-      <div class="bubble" :class="{ 'has-media': m.role === 'user' && userThumbs(m).length }">
+      <div
+        class="bubble"
+        :class="{
+          'has-media': m.role === 'user' && userThumbs(m).length,
+          'bubble--report': m.role === 'assistant' && isVehicleReportText(m.content),
+        }"
+      >
         <div v-if="m.role === 'user' && userThumbs(m).length" class="thumb-grid">
           <button
             v-for="(src, i) in userThumbs(m)"
@@ -99,7 +90,12 @@ function userThumbs(m: UiMsg): string[] {
             <img :src="src" class="thumb" alt="" />
           </button>
         </div>
-        <div v-if="m.role === 'assistant'" class="text md" v-html="assistantHtml(m.content)" />
+        <div
+          v-if="m.role === 'assistant'"
+          class="text md"
+          :class="{ 'md--report': isVehicleReportText(m.content) }"
+          v-html="assistantMessageHtml(m.content)"
+        />
         <div v-else-if="m.content" class="text">{{ m.content }}</div>
       </div>
     </div>
@@ -254,6 +250,186 @@ function userThumbs(m: UiMsg): string[] {
 }
 .assistant .bubble {
   background: var(--assistant-bubble);
+}
+.bubble--report {
+  max-width: min(100%, 640px);
+  padding: 16px 18px 18px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--surface) 92%, var(--accent) 8%)) 0%,
+    var(--assistant-bubble) 48%
+  );
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.md--report {
+  font-size: 15px;
+  line-height: 1.58;
+}
+.md--report :deep(.cr-report) {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.md--report :deep(.cr-gap) {
+  height: 10px;
+}
+.md--report :deep(.cr-para) {
+  margin: 0;
+  color: var(--text);
+}
+.md--report :deep(.cr-para--note) {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--muted);
+}
+.md--report :deep(.cr-verdict) {
+  margin: 4px 0 16px;
+}
+.md--report :deep(.cr-verdict__card) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  padding: 18px 20px 16px;
+  border-radius: 16px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, var(--surface)) 0%, var(--surface-2) 100%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.md--report :deep(.cr-verdict__eyebrow) {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.md--report :deep(.cr-verdict__grade) {
+  margin: 0;
+  font-size: clamp(2.5rem, 8vw, 3.25rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+.md--report :deep(.cr-verdict__sub) {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.md--report :deep(.cr-verdict--A .cr-verdict__grade) {
+  color: #16a34a;
+}
+.md--report :deep(.cr-verdict--B .cr-verdict__grade) {
+  color: #22c55e;
+}
+.md--report :deep(.cr-verdict--C .cr-verdict__grade) {
+  color: #ca8a04;
+}
+.md--report :deep(.cr-verdict--D .cr-verdict__grade) {
+  color: #ea580c;
+}
+.md--report :deep(.cr-verdict--E .cr-verdict__grade) {
+  color: #dc2626;
+}
+.md--report :deep(.cr-verdict--F .cr-verdict__grade) {
+  color: #b91c1c;
+}
+[data-theme='dark'] .md--report :deep(.cr-verdict--A .cr-verdict__grade) {
+  color: #4ade80;
+}
+[data-theme='dark'] .md--report :deep(.cr-verdict--B .cr-verdict__grade) {
+  color: #86efac;
+}
+[data-theme='dark'] .md--report :deep(.cr-verdict--C .cr-verdict__grade) {
+  color: #facc15;
+}
+[data-theme='dark'] .md--report :deep(.cr-verdict--D .cr-verdict__grade) {
+  color: #fb923c;
+}
+[data-theme='dark'] .md--report :deep(.cr-verdict--E .cr-verdict__grade) {
+  color: #f87171;
+}
+[data-theme='dark'] .md--report :deep(.cr-verdict--F .cr-verdict__grade) {
+  color: #fca5a5;
+}
+.md--report :deep(.cr-metric) {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.md--report :deep(.cr-metric[data-na='1'] .cr-metric__track) {
+  opacity: 0.35;
+}
+.md--report :deep(.cr-metric__row) {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.md--report :deep(.cr-metric__name) {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.md--report :deep(.cr-metric__val) {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.md--report :deep(.cr-metric__track) {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
+  overflow: hidden;
+}
+.md--report :deep(.cr-metric__fill) {
+  height: 100%;
+  width: calc(var(--cr-metric-pct) * 1%);
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  transition: width 0.35s ease;
+}
+.md--report :deep(.cr-bullets) {
+  margin: 8px 0 12px;
+  padding: 12px 14px 12px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-2) 95%, var(--accent) 5%);
+  border: 1px solid var(--border);
+  list-style: none;
+}
+.md--report :deep(.cr-bullets__item) {
+  position: relative;
+  padding: 6px 0 6px 18px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.md--report :deep(.cr-bullets__item + .cr-bullets__item) {
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.md--report :deep(.cr-bullets__dot) {
+  position: absolute;
+  left: 2px;
+  top: 14px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.85;
 }
 .skeleton {
   animation: pulse 1.2s ease-in-out infinite;
