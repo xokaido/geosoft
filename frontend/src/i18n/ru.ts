@@ -61,6 +61,8 @@ const messages: Messages = {
     rename_cancel: 'Отмена',
     rename_placeholder: 'Название чата',
     model_current: 'Модель',
+    verdict_eyebrow: 'Вердикт',
+    verdict_grade_sub: 'Общая оценка',
   },
   upload: {
     uploading: 'Загрузка...',

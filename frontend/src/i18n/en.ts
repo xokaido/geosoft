@@ -59,6 +59,8 @@ const messages = {
     rename_cancel: 'Cancel',
     rename_placeholder: 'Chat title',
     model_current: 'Model',
+    verdict_eyebrow: 'Verdict',
+    verdict_grade_sub: 'Overall grade',
   },
   upload: {
     uploading: 'Uploading...',

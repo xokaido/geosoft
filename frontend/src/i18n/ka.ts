@@ -61,6 +61,8 @@ const messages: Messages = {
     rename_cancel: 'გაუქმება',
     rename_placeholder: 'საუბრის სათაური',
     model_current: 'მოდელი',
+    verdict_eyebrow: 'დასკვნა',
+    verdict_grade_sub: 'საერთო შეფასება',
   },
   upload: {
     uploading: 'იტვირთება...',
