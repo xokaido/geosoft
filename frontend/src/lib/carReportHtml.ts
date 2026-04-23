@@ -10,7 +10,28 @@ function escapeHtml(s: string): string {
 }
 
 function applyBold(s: string): string {
-  return s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  return s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
+}
+
+/**
+ * Escape, bold, then strip *stray* leftover markdown markers (e.g. an unpaired
+ * `**` that the model emitted). Prevents `* **Label** **` artefacts from
+ * leaking into the rendered UI.
+ */
+function renderInline(raw: string): string {
+  const escaped = escapeHtml(raw)
+  const bolded = applyBold(escaped)
+  return bolded
+    .replace(/\*\*/g, '') // drop any remaining unpaired bold markers
+    .replace(/^\s*\*\s+/, '') // drop leading bullet-style single *
+    .replace(/\s+\*\s*$/, '') // drop trailing stray single *
+    .trim()
+}
+
+function stripLeadingListMarker(s: string): string {
+  return s
+    .replace(/^\s*[-*•\u2022–—]\s+/, '')
+    .replace(/^\s*\d+[.)]\s+/, '')
 }
 
 /** Heuristic: use rich report when it looks like our vehicle assessment output. */
@@ -59,44 +80,64 @@ function isHeadingLine(t: string): boolean {
   return HEADING_PATTERNS.some((re) => re.test(clean))
 }
 
-const LOOSE_METRIC = /^(.+?)\s*[:：]\s*(.+?)\s*$/i
+const LOOSE_METRIC_COLON = /^(.+?)\s*[:：]\s*(.+?)\s*$/i
+/** Matches "label 7/10" / "label N/A" / "**label** 7/10" without a colon. */
+const LOOSE_METRIC_NOCOLON = /^(.+?)\s+(\d{1,2}\s*\/\s*10|N\/?A(?:\s*\([^)]*\))?)\s*\*{0,2}\s*$/i
 
 const SCORE_LABEL_RE =
   /exterior|interior|engine|mechanical|condition|ratings?|damage|age|miles?|odometer|model|trim|score|market|price range|value|გარე|შიდა|ძრავ|მდგომ|ცვეთ|რეიტინგ|оценк|внешн|внутрен|двигат|состоян/i
 
-function isLikelyScoreLine(label: string, valuePart: string): boolean {
-  const v = valuePart.trim()
-  if (/N\/?A/i.test(v)) return true
-  if (/\/\s*10/.test(v)) return true
-  if (/^(\d{1,2})\s*\/\s*10$/.test(v) || /^(10|[0-9])$/.test(v)) {
-    const n = parseInt(v, 10)
-    if (n >= 0 && n <= 10) return SCORE_LABEL_RE.test(label)
-  }
+function isScoreValue(v: string): boolean {
+  const t = v.trim()
+  if (/N\/?A/i.test(t)) return true
+  if (/^\*{0,2}\s*\d{1,2}\s*\/\s*10\s*\*{0,2}$/.test(t)) return true
+  if (/^\*{0,2}\s*(10|[0-9])\s*\*{0,2}$/.test(t)) return true
   return false
 }
 
 function formatMetricBlock(line: string): string {
-  const m = line.match(LOOSE_METRIC)
-  if (!m) return ''
-  const name = m[1].trim()
-  const valuePart = m[2].trim()
-  if (!isLikelyScoreLine(name, valuePart)) return ''
+  const cleaned = stripLeadingListMarker(line).trim()
+  if (!cleaned) return ''
+
+  let name = ''
+  let valuePart = ''
+
+  const colonMatch = cleaned.match(LOOSE_METRIC_COLON)
+  if (colonMatch) {
+    name = colonMatch[1].trim()
+    valuePart = colonMatch[2].trim()
+  } else {
+    const noColon = cleaned.match(LOOSE_METRIC_NOCOLON)
+    if (!noColon) return ''
+    name = noColon[1].trim()
+    valuePart = noColon[2].trim()
+  }
+
+  // Strip wrapping bold markers around the label so the name regex can recognise it.
+  const nameClean = name.replace(/^\*+/, '').replace(/\*+$/, '').trim()
+  if (!isScoreValue(valuePart)) return ''
+  if (!/N\/?A/i.test(valuePart) && !SCORE_LABEL_RE.test(nameClean)) return ''
 
   const na = /N\/?A/i.test(valuePart)
   let num = 0
   if (!na) {
-    const s10 = valuePart.match(/^(\d{1,2})\s*\/\s*10$/)
-    const s1 = valuePart.match(/^(10|[0-9])$/)
+    const digits = valuePart.replace(/\*+/g, '').trim()
+    const s10 = digits.match(/^(\d{1,2})\s*\/\s*10$/)
+    const s1 = digits.match(/^(10|[0-9])$/)
     if (s10) num = Math.min(10, parseInt(s10[1], 10) || 0)
     else if (s1) num = Math.min(10, parseInt(s1[1], 10) || 0)
   }
   const pct = na ? 0 : num * 10
-  const valShow = /\/\s*10/.test(valuePart) || na ? valuePart : `${num}/10`
+  const valShow = na
+    ? valuePart.replace(/\*+/g, '').trim()
+    : /\/\s*10/.test(valuePart)
+      ? valuePart.replace(/\*+/g, '').trim()
+      : `${num}/10`
   return [
     `<div class="cr-metric" ${na ? 'data-na="1"' : ''} style="--cr-metric-pct: ${pct}">`,
     `<div class="cr-metric__row">`,
-    `<span class="cr-metric__name">${applyBold(escapeHtml(name))}</span>`,
-    `<span class="cr-metric__val">${applyBold(escapeHtml(valShow))}</span>`,
+    `<span class="cr-metric__name">${renderInline(nameClean)}</span>`,
+    `<span class="cr-metric__val">${renderInline(valShow)}</span>`,
     `</div>`,
     `<div class="cr-metric__track" role="presentation"><div class="cr-metric__fill"></div></div>`,
     `</div>`,
@@ -117,7 +158,7 @@ export function formatCarReportHtml(raw: string): string {
     out.push('<ul class="cr-bullets">')
     for (const item of bul) {
       out.push(
-        `<li class="cr-bullets__item"><span class="cr-bullets__dot" aria-hidden="true"></span><span class="cr-bullets__text">${applyBold(escapeHtml(item))}</span></li>`
+        `<li class="cr-bullets__item"><span class="cr-bullets__dot" aria-hidden="true"></span><span class="cr-bullets__text">${renderInline(item)}</span></li>`
       )
     }
     out.push('</ul>')
@@ -169,7 +210,7 @@ export function formatCarReportHtml(raw: string): string {
         ].join('')
       )
       if (rest) {
-        out.push(`<p class="cr-para cr-para--note">${applyBold(escapeHtml(rest))}</p>`)
+        out.push(`<p class="cr-para cr-para--note">${renderInline(rest)}</p>`)
       }
       continue
     }
@@ -179,9 +220,10 @@ export function formatCarReportHtml(raw: string): string {
       flushAll()
       const label = t
         .replace(/\*\*/g, '')
+        .replace(/^\s*[-*•\u2022–—]\s+/, '')
         .replace(/[:：.]\s*$/, '')
         .trim()
-      out.push(`<h3 class="cr-heading">${applyBold(escapeHtml(label))}</h3>`)
+      out.push(`<h3 class="cr-heading">${renderInline(label)}</h3>`)
       continue
     }
 
@@ -196,7 +238,7 @@ export function formatCarReportHtml(raw: string): string {
 
     // Bullet / numbered list
     if (/^[-*•\u2022–—]\s+/.test(t) || /^\d+[.)]\s+/.test(t)) {
-      const item = t.replace(/^[-*•\u2022–—]\s+/, '').replace(/^\d+[.)]\s+/, '')
+      const item = stripLeadingListMarker(t)
       // If it's secretly a score line inside bullets, promote to a metric card.
       const maybeMetric = formatMetricBlock(item)
       if (maybeMetric) {
@@ -210,7 +252,7 @@ export function formatCarReportHtml(raw: string): string {
     flushBul()
 
     // Fallback paragraph
-    out.push(`<p class="cr-para">${applyBold(escapeHtml(line))}</p>`)
+    out.push(`<p class="cr-para">${renderInline(line)}</p>`)
   }
   flushAll()
   return `<div class="cr-report">${out.join('')}</div>`

@@ -262,6 +262,7 @@ function userThumbs(m: UiMsg): string[] {
   padding: 18px 20px 20px;
   border-radius: 20px;
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  overflow: hidden; /* guard against any inline content blowing out the tile */
   background:
     radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 60%),
     linear-gradient(
@@ -298,7 +299,9 @@ function userThumbs(m: UiMsg): string[] {
 .md--report :deep(.cr-para) {
   margin: 0;
   color: var(--text);
-  overflow-wrap: break-word;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .md--report :deep(.cr-para--note) {
   margin: 6px 0 0;
@@ -309,6 +312,7 @@ function userThumbs(m: UiMsg): string[] {
   font-size: 14px;
   line-height: 1.55;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .md--report :deep(.cr-heading) {
   margin: 8px 0 2px;
@@ -407,10 +411,11 @@ function userThumbs(m: UiMsg): string[] {
 }
 .md--report :deep(.cr-metrics) {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 10px;
   width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   padding: 12px;
   border-radius: 16px;
   background: color-mix(in srgb, var(--surface-2) 92%, var(--accent) 8%);
@@ -423,6 +428,9 @@ function userThumbs(m: UiMsg): string[] {
   background: var(--surface);
   border: 1px solid var(--border);
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .md--report :deep(.cr-metric[data-na='1'] .cr-metric__track) {
   opacity: 0.35;
@@ -441,8 +449,10 @@ function userThumbs(m: UiMsg): string[] {
   font-weight: 600;
   color: var(--text);
   min-width: 0;
-  flex: 1 1 120px;
-  overflow-wrap: break-word;
+  flex: 1 1 100px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
 }
 .md--report :deep(.cr-metric__val) {
   font-size: 13px;
@@ -450,6 +460,7 @@ function userThumbs(m: UiMsg): string[] {
   font-variant-numeric: tabular-nums;
   color: var(--accent);
   flex: 0 0 auto;
+  overflow-wrap: anywhere;
 }
 .md--report :deep(.cr-metric__track) {
   height: 6px;
@@ -503,8 +514,8 @@ function userThumbs(m: UiMsg): string[] {
 .md--report :deep(.cr-bullets__text) {
   flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   white-space: normal;
   color: var(--text);
 }
