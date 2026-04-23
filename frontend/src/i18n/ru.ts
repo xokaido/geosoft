@@ -57,6 +57,8 @@ const messages: Messages = {
     chat_create_error: 'Не удалось создать сессию чата.',
     image_enlarge: 'Увеличить изображение',
     lightbox_close: 'Закрыть',
+    lightbox_prev: 'Предыдущее изображение',
+    lightbox_next: 'Следующее изображение',
     rename_session: 'Переименовать',
     rename_save: 'Сохранить',
     rename_cancel: 'Отмена',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { formatAssistantMessageHtml, isVehicleReportText } from '../lib/carReportHtml'
 import { useI18n } from '../i18n'
 
@@ -22,31 +22,68 @@ defineProps<{
 
 const { t } = useI18n()
 
-const lightboxUrl = ref<string | null>(null)
+/** One message’s images only — prev/next stay within this set (including history). */
+type LightboxState = { urls: string[]; index: number }
 
-let removeEscapeListener: (() => void) | null = null
+const lightbox = ref<LightboxState | null>(null)
 
-watch(lightboxUrl, (url) => {
-  removeEscapeListener?.()
-  removeEscapeListener = null
-  if (!url) return
+const lightboxImageUrl = computed(() => {
+  const lb = lightbox.value
+  if (!lb?.urls.length) return null
+  const i = Math.min(Math.max(0, lb.index), lb.urls.length - 1)
+  return lb.urls[i] ?? null
+})
+
+let removeKeyListener: (() => void) | null = null
+
+watch(lightbox, (lb) => {
+  removeKeyListener?.()
+  removeKeyListener = null
+  if (!lb?.urls.length) return
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') lightboxUrl.value = null
+    if (e.key === 'Escape') {
+      lightbox.value = null
+      return
+    }
+    if (lb.urls.length < 2) return
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      lightboxPrev()
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      lightboxNext()
+    }
   }
   window.addEventListener('keydown', onKey)
-  removeEscapeListener = () => window.removeEventListener('keydown', onKey)
+  removeKeyListener = () => window.removeEventListener('keydown', onKey)
 })
 
 onUnmounted(() => {
-  removeEscapeListener?.()
+  removeKeyListener?.()
 })
 
-function openLightbox(url: string) {
-  lightboxUrl.value = url
+function openLightbox(urls: string[], startIndex: number) {
+  if (!urls.length) return
+  const index = Math.min(Math.max(0, startIndex), urls.length - 1)
+  lightbox.value = { urls: [...urls], index }
 }
 
 function closeLightbox() {
-  lightboxUrl.value = null
+  lightbox.value = null
+}
+
+function lightboxPrev() {
+  const lb = lightbox.value
+  if (!lb || lb.urls.length < 2) return
+  const index = lb.index <= 0 ? lb.urls.length - 1 : lb.index - 1
+  lightbox.value = { urls: lb.urls, index }
+}
+
+function lightboxNext() {
+  const lb = lightbox.value
+  if (!lb || lb.urls.length < 2) return
+  const index = lb.index >= lb.urls.length - 1 ? 0 : lb.index + 1
+  lightbox.value = { urls: lb.urls, index }
 }
 
 function assistantMessageHtml(content: string): string {
@@ -88,7 +125,7 @@ function userThumbs(m: UiMsg): string[] {
             type="button"
             class="img-btn"
             :aria-label="t('chat.image_enlarge')"
-            @click="openLightbox(src)"
+            @click="openLightbox(userThumbs(m), i)"
           >
             <img :src="src" class="thumb" alt="" />
           </button>
@@ -111,7 +148,7 @@ function userThumbs(m: UiMsg): string[] {
 
   <Teleport to="body">
     <div
-      v-if="lightboxUrl"
+      v-if="lightboxImageUrl"
       class="lightbox"
       role="dialog"
       aria-modal="true"
@@ -121,7 +158,28 @@ function userThumbs(m: UiMsg): string[] {
       <button type="button" class="lightbox-close" :aria-label="t('chat.lightbox_close')" @click="closeLightbox">
         ×
       </button>
-      <img :src="lightboxUrl" class="lightbox-img" alt="" />
+      <template v-if="lightbox && lightbox.urls.length > 1">
+        <button
+          type="button"
+          class="lightbox-nav lightbox-nav--prev"
+          :aria-label="t('chat.lightbox_prev')"
+          @click.stop="lightboxPrev"
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          class="lightbox-nav lightbox-nav--next"
+          :aria-label="t('chat.lightbox_next')"
+          @click.stop="lightboxNext"
+        >
+          ›
+        </button>
+        <div class="lightbox-counter" aria-live="polite">
+          {{ lightbox.index + 1 }} / {{ lightbox.urls.length }}
+        </div>
+      </template>
+      <img :src="lightboxImageUrl" class="lightbox-img" alt="" @click.stop />
     </div>
   </Teleport>
 </template>
@@ -732,9 +790,10 @@ function userThumbs(m: UiMsg): string[] {
   position: fixed;
   inset: 0;
   z-index: 200;
-  display: grid;
-  place-items: center;
-  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 72px;
   background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(4px);
 }
@@ -746,6 +805,44 @@ function userThumbs(m: UiMsg): string[] {
   object-fit: contain;
   border-radius: 12px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+}
+.lightbox-nav {
+  position: fixed;
+  top: 50%;
+  z-index: 201;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #334155);
+  background: var(--surface, #111827);
+  color: var(--text, #e5e7eb);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0 0 2px;
+}
+.lightbox-nav--prev {
+  left: max(12px, env(safe-area-inset-left));
+}
+.lightbox-nav--next {
+  right: max(12px, env(safe-area-inset-right));
+}
+.lightbox-counter {
+  position: fixed;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 201;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text, #e5e7eb);
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid var(--border, #334155);
 }
 .lightbox-close {
   position: fixed;
@@ -761,5 +858,15 @@ function userThumbs(m: UiMsg): string[] {
   font-size: 24px;
   line-height: 1;
   cursor: pointer;
+}
+@media (max-width: 520px) {
+  .lightbox {
+    padding: 24px 52px;
+  }
+  .lightbox-nav {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+  }
 }
 </style>

@@ -55,6 +55,8 @@ const messages = {
     chat_create_error: 'Could not start a chat session.',
     image_enlarge: 'View image larger',
     lightbox_close: 'Close',
+    lightbox_prev: 'Previous image',
+    lightbox_next: 'Next image',
     rename_session: 'Rename chat',
     rename_save: 'Save',
     rename_cancel: 'Cancel',

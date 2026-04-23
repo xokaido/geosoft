@@ -57,6 +57,8 @@ const messages: Messages = {
     chat_create_error: 'საუბრის სესიის დაწყება ვერ მოხერხდა.',
     image_enlarge: 'სურათის გადიდება',
     lightbox_close: 'დახურვა',
+    lightbox_prev: 'წინა სურათი',
+    lightbox_next: 'შემდეგი სურათი',
     rename_session: 'სახელის შეცვლა',
     rename_save: 'შენახვა',
     rename_cancel: 'გაუქმება',
