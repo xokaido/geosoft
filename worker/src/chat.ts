@@ -6,9 +6,12 @@ import { geosoftAssistantFallbackContext } from './geosoft-overview'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
 import bundledChatSystemPrompt from './prompts/chat-system.md'
+import { signImageToken } from './upload'
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 131_072
 const ABSOLUTE_MAX_OUTPUT_TOKENS = 200_000
+const DEFAULT_MAX_ASSISTANT_CHARS = 200_000
+const ABSOLUTE_MAX_ASSISTANT_CHARS = 1_000_000
 
 function maxChatOutputTokens(env: Env): number {
   const raw = env.MAX_CHAT_OUTPUT_TOKENS
@@ -19,6 +22,14 @@ function maxChatOutputTokens(env: Env): number {
 }
 
 type ChatMessage = { role: string; content: string | unknown[] }
+
+function maxAssistantChars(env: Env): number {
+  const raw = (env as unknown as { MAX_ASSISTANT_CHARS?: string }).MAX_ASSISTANT_CHARS
+  if (raw === undefined || raw === '') return DEFAULT_MAX_ASSISTANT_CHARS
+  const n = Number.parseInt(String(raw).trim(), 10)
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_ASSISTANT_CHARS
+  return Math.min(Math.floor(n), ABSOLUTE_MAX_ASSISTANT_CHARS)
+}
 
 function lastUserQuery(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -35,20 +46,7 @@ function lastUserQuery(messages: ChatMessage[]): string {
   return ''
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunk = 0x8000
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
-  }
-  return btoa(binary)
-}
-
-async function loadImageFromR2(
-  env: Env,
-  imageUrl: string | undefined
-): Promise<{ dataUrl: string } | null> {
-  if (!imageUrl) return null
+async function signedImageUrl(env: Env, reqUrl: string, imageUrl: string): Promise<string | null> {
   let pathname: string
   try {
     pathname = imageUrl.startsWith('http') ? new URL(imageUrl).pathname : imageUrl
@@ -58,13 +56,10 @@ async function loadImageFromR2(
   const m = pathname.match(/^\/api\/image\/(.+)$/)
   if (!m) return null
   const name = m[1]
-  if (name.includes('..') || name.includes('/')) return null
-  const obj = await env.R2.get(`uploads/${name}`)
-  if (!obj?.body) return null
-  const buf = new Uint8Array(await obj.arrayBuffer())
-  const mime = obj.httpMetadata?.contentType ?? 'image/jpeg'
-  const b64 = bytesToBase64(buf)
-  return { dataUrl: `data:${mime};base64,${b64}` }
+  if (!name || name.includes('..') || name.includes('/')) return null
+  const token = await signImageToken(env, name)
+  const origin = new URL(reqUrl).origin
+  return `${origin}/image-signed/${token}`
 }
 
 function buildUserContent(text: string, imageDataUrls: string[]): string | unknown[] {
@@ -169,11 +164,15 @@ function transformAiSseToTokenSse(source: ReadableStream<Uint8Array>): ReadableS
   })
 }
 
-async function accumulateWorkersAiText(source: ReadableStream<Uint8Array>): Promise<string> {
+async function accumulateWorkersAiText(
+  source: ReadableStream<Uint8Array>,
+  maxChars: number
+): Promise<string> {
   const dec = new TextDecoder()
   let lineBuf = ''
   const prevResponse = { value: '' }
   let full = ''
+  let truncated = false
 
   const handleLine = (line: string) => {
     const trimmed = line.trim()
@@ -183,7 +182,18 @@ async function accumulateWorkersAiText(source: ReadableStream<Uint8Array>): Prom
     try {
       const json = JSON.parse(payload) as Record<string, unknown>
       const piece = extractStreamDelta(json, prevResponse)
-      if (piece) full += piece
+      if (!piece) return
+      if (full.length >= maxChars) {
+        truncated = true
+        return
+      }
+      const room = maxChars - full.length
+      if (piece.length <= room) {
+        full += piece
+      } else {
+        full += piece.slice(0, room)
+        truncated = true
+      }
     } catch {
       // ignore
     }
@@ -206,6 +216,11 @@ async function accumulateWorkersAiText(source: ReadableStream<Uint8Array>): Prom
     while (true) {
       const { done, value } = await reader.read()
       if (value) appendAndDrain(dec.decode(value, { stream: true }))
+      if (truncated) {
+        // Stop pulling more data once we've hit a safe cap.
+        await reader.cancel().catch(() => {})
+        break
+      }
       if (done) {
         appendAndDrain(dec.decode())
         if (lineBuf.trim()) handleLine(lineBuf)
@@ -214,6 +229,9 @@ async function accumulateWorkersAiText(source: ReadableStream<Uint8Array>): Prom
     }
   } finally {
     reader.releaseLock()
+  }
+  if (truncated) {
+    full += '\n\n[Truncated due to server-side safety limit]'
   }
   return full
 }
@@ -284,11 +302,11 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
       return c.json({ error: 'Model does not support images' }, 400)
     }
     for (const url of rawUrls) {
-      const dataUrl = (await loadImageFromR2(c.env, url))?.dataUrl ?? null
-      if (!dataUrl) {
+      const signed = await signedImageUrl(c.env, c.req.url, url)
+      if (!signed) {
         return c.json({ error: 'One or more images were not found' }, 404)
       }
-      imageDataUrls.push(dataUrl)
+      imageDataUrls.push(signed)
     }
   }
 
@@ -385,7 +403,8 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     const assistantModelName = meta?.name ?? meta?.slug ?? model
     const assistantMsgId = crypto.randomUUID()
 
-    const persist = accumulateWorkersAiText(toRecorder).then((assistantText) =>
+    const cap = maxAssistantChars(c.env)
+    const persist = accumulateWorkersAiText(toRecorder, cap).then((assistantText) =>
       finalizeExchange(c.env.DB, {
         chatId,
         assistantMessageId: assistantMsgId,

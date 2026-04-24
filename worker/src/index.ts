@@ -19,7 +19,7 @@ import {
 import { MODELS } from './models'
 import { ingestGeosoftToVectorize } from './rag'
 import type { Env } from './types'
-import { handleImage, handleUpload } from './upload'
+import { handleImage, handleSignedImage, handleUpload } from './upload'
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -72,6 +72,9 @@ app.post('/api/logout', async (c) => {
   clearSessionCookie(c)
   return c.json({ ok: true })
 })
+
+// Public, short-lived signed URLs for model providers (avoid buffering image bytes in the worker).
+app.get('/image-signed/:token', (c) => handleSignedImage(c))
 
 const api = new Hono<{ Bindings: Env }>()
 api.use('*', requireAuth)

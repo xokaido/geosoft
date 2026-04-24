@@ -12,6 +12,8 @@ export type Env = {
   AUTH_PASSWORD?: string
   /** Max completion tokens for `/api/chat` (string from wrangler vars). */
   MAX_CHAT_OUTPUT_TOKENS?: string
+  /** Max assistant characters stored in D1 for `/api/chat` (string from wrangler vars). */
+  MAX_ASSISTANT_CHARS?: string
   /** OpenRouter API key (`wrangler secret put OPENROUTER_API_KEY`). */
   OPENROUTER_API_KEY?: string
   /** Optional site URL for OpenRouter app attribution (`HTTP-Referer`). */
