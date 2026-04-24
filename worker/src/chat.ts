@@ -38,6 +38,48 @@ function maxAssistantChars(env: Env): number {
   return Math.min(Math.floor(n), ABSOLUTE_MAX_ASSISTANT_CHARS)
 }
 
+/** From app language switcher: ka | ru | en */
+type UiLanguage = 'ka' | 'ru' | 'en'
+
+const UI_LANG_LABEL: Record<UiLanguage, string> = {
+  ka: 'Georgian (ქართული)',
+  ru: 'Russian (русский)',
+  en: 'English',
+}
+
+function parseUiLanguage(raw: unknown): UiLanguage | null {
+  if (raw === 'ka' || raw === 'ru' || raw === 'en') return raw
+  return null
+}
+
+function langLineRagWithSnippets(ui: UiLanguage | null): string {
+  if (ui) {
+    return `Write the entire answer in ${UI_LANG_LABEL[ui]}. The user chose this language in the app UI; use it for the response even if the user’s message is in another language, unless the user clearly asks for a different reply language.`
+  }
+  return `Write the entire answer in the same language as the user’s latest message (Georgian → Georgian, Russian → Russian, etc.); do not switch to English unless the user wrote in English.`
+}
+
+function langLineRagFallbackOnly(ui: UiLanguage | null): string {
+  if (ui) {
+    return `Write your entire answer in ${UI_LANG_LABEL[ui]}. The app UI language takes precedence for the response unless the user explicitly requests another output language.`
+  }
+  return `Write your entire answer in the same language as the user’s latest message (Georgian → Georgian only, Russian → Russian only, etc.).`
+}
+
+function systemOutputLanguageFromUi(ui: UiLanguage | null): string {
+  if (ui) {
+    return (
+      `Output language: The application UI is set to ${UI_LANG_LABEL[ui]}. ` +
+      `Write the full assistant reply in that language. ` +
+      `If the user’s message is in a different language, still answer in ${UI_LANG_LABEL[ui]} unless the user explicitly asks for the reply in another language.`
+    )
+  }
+  return (
+    'Output language: Match the user’s latest message. Write the full reply in that language only (e.g. ქართული prompt → ქართული პასუხი მთლიანად). ' +
+    'Do not answer in English when the user wrote Georgian, Russian, or another non-English language. English is allowed only if the user’s message is English or they explicitly request English.'
+  )
+}
+
 function maxChatImages(env: Env): number {
   const raw = env.MAX_CHAT_IMAGES
   if (raw === undefined || raw === '') return DEFAULT_MAX_CHAT_IMAGES
@@ -315,6 +357,8 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     imageUrls?: string[]
     useRag?: boolean
     chatId?: string
+    /** ka | ru | en — app language switcher; drives assistant reply language */
+    uiLanguage?: string
   }
   try {
     body = await c.req.json()
@@ -354,6 +398,7 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
 
   const ragOn = !!body.useRag
   const hasRagContext = ragBlock.trim().length > 0
+  const uiLang = parseUiLanguage(body.uiLanguage)
 
   const vision = isVisionModel(model)
   const rawUrls: string[] = []
@@ -395,7 +440,9 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
           'You are a helpful, friendly assistant for GeoSoft (geosoft.ge), the Georgian cloud & workplace technology partner. The user enabled the geosoft.ge knowledge base.\n' +
           'Answer using the retrieved passages below for factual claims about the company, products, and site content. ' +
           'When you use a fact from a passage, mention its source number (e.g. Source 1). ' +
-          'If something is not in the passages, say so honestly. Write the entire answer in the same language as the user’s latest message (Georgian → Georgian, Russian → Russian, etc.); do not switch to English unless the user wrote in English.\n\n' +
+          'If something is not in the passages, say so honestly. ' +
+          langLineRagWithSnippets(uiLang) +
+          '\n\n' +
           ragBlock,
       })
     } else {
@@ -405,7 +452,8 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
           'You are a warm, professional assistant for GeoSoft (geosoft.ge), the Georgian cloud & workplace technology partner.\n' +
           'The live site index did not return matching snippets for this question, but you must still answer helpfully using ONLY the approved overview below. ' +
           'Do not invent prices, contract terms, or SKU-level catalog details not stated there. ' +
-          'Write your entire answer in the same language as the user’s latest message (Georgian → Georgian only, Russian → Russian only, etc.). Be concise, friendly, and invite them to visit geosoft.ge or contact GeoSoft for specifics.\n' +
+          langLineRagFallbackOnly(uiLang) +
+          ' Be concise, friendly, and invite them to visit geosoft.ge or contact GeoSoft for specifics.\n' +
           'Do not open with a harsh refusal — acknowledge the question and give useful orientation.\n\n' +
           geosoftAssistantFallbackContext(),
       })
@@ -414,8 +462,7 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
 
   outMessages.push({
     role: 'system',
-    content:
-      'Output language: Match the user’s latest message. Write the full reply in that language only (e.g. ქართული prompt → ქართული პასუხი მთლიანად). Do not answer in English when the user wrote Georgian, Russian, or another non-English language. English is allowed only if the user’s message is English or they explicitly request English.',
+    content: systemOutputLanguageFromUi(uiLang),
   })
 
   for (const m of messages) {
@@ -458,13 +505,16 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
         const fromN = from + 1
         const toN = from + slice.length
         const safeQ = (userTextForDb || '(no text; images only)').replace(/"/g, "'")
+        const descLangHint = uiLang
+          ? `Write these descriptions in ${UI_LANG_LABEL[uiLang]} (same as the app UI language).`
+          : 'If the user message is in a non-English language, write these descriptions in that language when possible.'
         const instr =
           `You are processing part of a ${total}-image request. ` +
           `This is batch ${b + 1} of ${nBatches} (images ${fromN}–${toN} of ${total}). ` +
           `User message (for context; must not be used to invent image contents): "${safeQ}". ` +
           `For each image in order, give a short factual description (2–4 sentences) of what is visible. ` +
           `Begin each block with a line "Image N:" where N is the global index (${fromN}…${toN}). ` +
-          `If the user message is in a non-English language, write these descriptions in that language when possible.`
+          descLangHint
 
         const batchMessages: ChatMessage[] = [
           {
