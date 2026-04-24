@@ -6,6 +6,7 @@ import {
   setSessionCookie,
   signSession,
 } from './auth'
+import { normalizeLoginUsername, verifyAppUserCredentials } from './user-auth'
 import { handleChat } from './chat'
 import {
   handleCreateChat,
@@ -38,10 +39,16 @@ app.post('/api/login', async (c) => {
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400)
   }
-  if (body.username !== c.env.AUTH_USERNAME || body.password !== c.env.AUTH_PASSWORD) {
+  const username = normalizeLoginUsername(body.username)
+  const password = typeof body.password === 'string' ? body.password : ''
+  if (!username || password.length < 8) {
     return c.json({ error: 'Invalid username or password' }, 401)
   }
-  const token = await signSession(c.env, body.username)
+  const ok = await verifyAppUserCredentials(c.env.DB, username, password)
+  if (!ok) {
+    return c.json({ error: 'Invalid username or password' }, 401)
+  }
+  const token = await signSession(c.env, username)
   setSessionCookie(c, token)
   return c.json({ ok: true })
 })

@@ -11,6 +11,7 @@
     "deploy": "wrangler deploy",
     "ingest": "npx tsx scripts/ingest-geosoft.ts",
     "models:sync": "npx tsx scripts/generate-workers-ai-models.ts",
+    "user:add": "npx tsx scripts/add-app-user.ts",
     "typecheck": "vue-tsc -p frontend/tsconfig.json --noEmit"
   },
   "dependencies": {

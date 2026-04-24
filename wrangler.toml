@@ -36,7 +36,6 @@ directory = "dist"
 binding = "ASSETS"
 
 [vars]
-AUTH_USERNAME = "admin"
 # Workers AI caps this per model; high values request as much output as the model allows.
 MAX_CHAT_OUTPUT_TOKENS = "131072"
 
@@ -46,6 +45,5 @@ MAX_CHAT_OUTPUT_TOKENS = "131072"
 OPENROUTER_HTTP_REFERER = "http://localhost:5173"
 OPENROUTER_APP_TITLE = "GeoSoft AI Chat"
 
-# For production, set AUTH_PASSWORD and SESSION_SECRET via `wrangler secret put`
-AUTH_PASSWORD = "changeme"
+# Logins are rows in D1 `app_users` (see README). For production, set SESSION_SECRET via `wrangler secret put`.
 SESSION_SECRET = "dev-only-change-me-use-wrangler-secret-in-prod"

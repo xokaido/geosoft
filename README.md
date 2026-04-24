@@ -21,7 +21,7 @@ All Wrangler commands run from the **repository root** (`wrangler.toml` is at th
 
 1. Authenticate: `wrangler login`
 2. **D1**: `npx wrangler d1 create geosoft-chat-db` — copy `database_id` into `wrangler.toml`
-3. **Migrations**: `npx wrangler d1 migrations apply geosoft-chat-db --remote`
+3. **Migrations**: `npx wrangler d1 migrations apply geosoft-chat-db --remote` (applies all SQL in `worker/migrations/`, including `app_users` for per-user logins). For `wrangler dev`, also run `… --local`.
 4. **R2**: `npx wrangler r2 bucket create geosoft` (or confirm it exists)
 5. **Vectorize** (768 dims, cosine, matches `@cf/baai/bge-base-en-v1.5`):
 
@@ -30,7 +30,6 @@ All Wrangler commands run from the **repository root** (`wrangler.toml` is at th
 6. **Secrets** (recommended for production):
 
    ```bash
-   npx wrangler secret put AUTH_PASSWORD
    npx wrangler secret put SESSION_SECRET
    npx wrangler secret put OPENROUTER_API_KEY
    ```
@@ -38,6 +37,14 @@ All Wrangler commands run from the **repository root** (`wrangler.toml` is at th
    Remove or override the dev fallbacks in `wrangler.toml` `[vars]` once secrets are set.
 
    For local `wrangler dev`, copy `.dev.vars.example` to **`.dev.vars`** and set `OPENROUTER_API_KEY` (this file is gitignored).
+
+7. **Create logins** (one row per person; no self-service registration). Passwords must be at least 8 characters.
+
+   ```bash
+   npm run user:add -- company_a 'their-secure-password'
+   ```
+
+   Run the printed `wrangler d1 execute …` command against **local** or **remote** D1. Each username gets its own chat history (`chats.user_id`). Repeat for every company user.
 
 ---
 
@@ -58,7 +65,7 @@ npm run dev
 - Frontend: http://localhost:5173 (proxies `/api` → http://127.0.0.1:8787)
 - Worker: http://127.0.0.1:8787
 
-Default credentials match `wrangler.toml` (`AUTH_USERNAME` / `AUTH_PASSWORD`) until you change them.
+After `d1 migrations apply --local`, create at least one user with `npm run user:add -- <username> '<password>'` and run the printed SQL against the local database, then sign in with that username and password.
 
 ---
 
@@ -123,9 +130,8 @@ npm run build
 
 | Variable | Where | Description |
 |----------|-------|-------------|
-| `AUTH_USERNAME` | `wrangler.toml` `[vars]` | Login username |
-| `AUTH_PASSWORD` | `[vars]` locally / `wrangler secret put` in prod | Login password |
 | `SESSION_SECRET` | `[vars]` locally / `wrangler secret put` in prod | JWT signing key |
+| *(logins)* | D1 table `app_users` | Usernames and PBKDF2 password hashes; provision with `npm run user:add` (see Cloudflare setup above) |
 | `CLOUDFLARE_ACCOUNT_ID` | `.env` (ingest script only) | Account ID for REST calls |
 | `CLOUDFLARE_API_TOKEN` | `.env` (ingest script only) | Token with AI + Vectorize permissions |
 | `OPENROUTER_API_KEY` | `wrangler secret put` / `.dev.vars` | [OpenRouter](https://openrouter.ai/) API key for chat |
