@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import {
-  pickChatImageFiles,
-  uploadChatImageFiles,
-  type ChatImageUploadErrorKey,
-} from '../lib/chat-image-upload'
+import { pickChatImageFiles } from '../lib/chat-image-upload'
 import { useI18n } from '../i18n'
 
 const { t } = useI18n()
@@ -21,47 +17,26 @@ const props = withDefaults(
 const isIcon = computed(() => props.variant === 'icon')
 
 const emit = defineEmits<{
-  uploaded: [urls: string[]]
-  error: [message: string]
+  picked: [files: File[]]
 }>()
 
 const MAX_FILES = 12
 
-const uploading = ref(false)
 const inputRef = ref<HTMLInputElement | null>(null)
 const dropActive = ref(false)
 
-function mapErr(key: ChatImageUploadErrorKey): string {
-  if (key === 'invalid_type') return t('upload.invalid_type')
-  if (key === 'too_large') return t('upload.too_large')
-  return t('upload.error')
-}
-
 function open() {
-  if (props.disabled || uploading.value) return
+  if (props.disabled) return
   inputRef.value?.click()
 }
 
-async function ingestFiles(files: File[]) {
+function ingestFiles(files: File[]) {
   const images = pickChatImageFiles(files)
   if (!images.length) {
-    emit('error', t('upload.invalid_type'))
     return
   }
   const batch = images.slice(0, MAX_FILES)
-  uploading.value = true
-  try {
-    const result = await uploadChatImageFiles(batch)
-    if ('error' in result) {
-      emit('error', mapErr(result.error))
-      return
-    }
-    if (result.urls.length) emit('uploaded', result.urls)
-  } catch {
-    emit('error', t('upload.error'))
-  } finally {
-    uploading.value = false
-  }
+  emit('picked', batch)
 }
 
 async function onPick(e: Event) {
@@ -69,7 +44,7 @@ async function onPick(e: Event) {
   const picked = input.files ? Array.from(input.files) : []
   input.value = ''
   if (!picked.length) return
-  await ingestFiles(picked)
+  ingestFiles(picked)
 }
 
 function isFileDrag(dt: DataTransfer | null): boolean {
@@ -77,7 +52,7 @@ function isFileDrag(dt: DataTransfer | null): boolean {
 }
 
 function onDragOver(e: DragEvent) {
-  if (props.disabled || uploading.value || !isFileDrag(e.dataTransfer)) return
+  if (props.disabled || !isFileDrag(e.dataTransfer)) return
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
   dropActive.value = true
@@ -92,11 +67,11 @@ function onDragLeave(e: DragEvent) {
 
 async function onDrop(e: DragEvent) {
   dropActive.value = false
-  if (props.disabled || uploading.value) return
+  if (props.disabled) return
   e.preventDefault()
   const list = e.dataTransfer?.files
   if (!list?.length) return
-  await ingestFiles(Array.from(list))
+  ingestFiles(Array.from(list))
 }
 
 function onWindowDragEnd() {
@@ -132,14 +107,12 @@ onUnmounted(() => {
       v-if="isIcon"
       type="button"
       class="btn btn--icon"
-      :disabled="disabled || uploading"
-      :title="uploading ? t('upload.uploading') : t('chat.attach_image')"
-      :aria-label="uploading ? t('upload.uploading') : t('chat.attach_image')"
+      :disabled="disabled"
+      :title="t('chat.attach_image')"
+      :aria-label="t('chat.attach_image')"
       @click="open"
     >
-      <span v-if="uploading" class="btn-icon-label">{{ t('upload.uploading') }}</span>
       <svg
-        v-else
         class="btn-ico"
         width="22"
         height="22"
@@ -156,8 +129,8 @@ onUnmounted(() => {
         <path d="M21 15l-5.08-5.08a1.6 1.6 0 0 0-2.26 0L9 14.5" />
       </svg>
     </button>
-    <button v-else type="button" class="btn" :disabled="disabled || uploading" @click="open">
-      {{ uploading ? t('upload.uploading') : t('chat.attach_image') }}
+    <button v-else type="button" class="btn" :disabled="disabled" @click="open">
+      {{ t('chat.attach_image') }}
     </button>
   </div>
 </template>
@@ -246,13 +219,5 @@ onUnmounted(() => {
 }
 .btn-ico {
   display: block;
-}
-.btn-icon-label {
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1.1;
-  text-align: center;
-  padding: 0 4px;
-  color: var(--muted);
 }
 </style>

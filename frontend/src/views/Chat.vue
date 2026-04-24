@@ -7,8 +7,9 @@ import MessageList, { type UiMsg } from '../components/MessageList.vue'
 import ModelSelector, { type UiModel } from '../components/ModelSelector.vue'
 import {
   pickChatImageFiles,
-  uploadChatImageFiles,
   type ChatImageUploadErrorKey,
+  uploadChatImageFilesWithProgress,
+  type UploadProgressUpdate,
 } from '../lib/chat-image-upload'
 import { useI18n } from '../i18n'
 import { useAuthStore } from '../stores/auth'
@@ -33,6 +34,15 @@ const uploadHint = ref('')
 const renameChatId = ref<string | null>(null)
 const renameDraft = ref('')
 
+type UploadItem = {
+  id: string
+  name: string
+  progress: number
+  status: 'queued' | 'uploading' | 'done' | 'error'
+}
+const uploadItems = ref<UploadItem[]>([])
+const uploadBusy = ref(false)
+
 type ApiChat = { id: string; modelId: string; title: string; createdAt: number; updatedAt: number }
 const chats = ref<ApiChat[]>([])
 const chatsLoading = ref(false)
@@ -46,7 +56,7 @@ const streamingModelName = ref('')
 
 const listRef = ref<HTMLElement | null>(null)
 const dragOverZone = ref<null | 'messages' | 'composer'>(null)
-const dropUploading = ref(false)
+const dropUploading = computed(() => uploadBusy.value)
 
 const selectedModel = computed(() => models.value.find((m) => m.id === modelId.value))
 const vision = computed(
@@ -266,6 +276,50 @@ function mapUploadErr(key: ChatImageUploadErrorKey): string {
   return t('upload.error')
 }
 
+function applyUploadUpdate(u: UploadProgressUpdate) {
+  const idx = uploadItems.value.findIndex((x) => x.id === u.id)
+  const item: UploadItem = {
+    id: u.id,
+    name: u.file.name || `image-${u.index + 1}`,
+    progress: u.percent,
+    status: u.status,
+  }
+  if (idx >= 0) uploadItems.value[idx] = item
+  else uploadItems.value.push(item)
+}
+
+async function uploadAndAttach(files: File[]) {
+  if (!vision.value || thinking.value || uploadBusy.value) return
+  const room = MAX_IMAGES - imageUrls.value.length
+  if (room <= 0) {
+    onUploadError(t('chat.max_images_reached'))
+    return
+  }
+  const images = pickChatImageFiles(files)
+  if (!images.length) {
+    onUploadError(t('upload.invalid_type'))
+    return
+  }
+  const batch = images.slice(0, room)
+  uploadBusy.value = true
+  uploadItems.value = []
+  try {
+    const result = await uploadChatImageFilesWithProgress(batch, applyUploadUpdate)
+    if ('error' in result) {
+      onUploadError(mapUploadErr(result.error))
+      return
+    }
+    if (result.urls.length) onImagesUploaded(result.urls)
+  } catch {
+    onUploadError(t('upload.error'))
+  } finally {
+    uploadBusy.value = false
+    setTimeout(() => {
+      if (!uploadBusy.value) uploadItems.value = []
+    }, 1500)
+  }
+}
+
 function isFileDrag(dt: DataTransfer | null): boolean {
   return !!dt?.types?.length && Array.from(dt.types).includes('Files')
 }
@@ -291,30 +345,7 @@ async function onDropZone(e: DragEvent, _zone: 'messages' | 'composer') {
   e.preventDefault()
   const raw = e.dataTransfer?.files
   if (!raw?.length) return
-  const images = pickChatImageFiles(Array.from(raw))
-  if (!images.length) {
-    onUploadError(t('upload.invalid_type'))
-    return
-  }
-  const room = MAX_IMAGES - imageUrls.value.length
-  if (room <= 0) {
-    onUploadError(t('chat.max_images_reached'))
-    return
-  }
-  const batch = images.slice(0, room)
-  dropUploading.value = true
-  try {
-    const result = await uploadChatImageFiles(batch)
-    if ('error' in result) {
-      onUploadError(mapUploadErr(result.error))
-      return
-    }
-    if (result.urls.length) onImagesUploaded(result.urls)
-  } catch {
-    onUploadError(t('upload.error'))
-  } finally {
-    dropUploading.value = false
-  }
+  await uploadAndAttach(Array.from(raw))
 }
 
 function openRename(c: ApiChat) {
@@ -684,9 +715,8 @@ async function send() {
               <ImageUpload
                 v-if="vision"
                 variant="icon"
-                :disabled="thinking"
-                @uploaded="onImagesUploaded"
-                @error="onUploadError"
+                :disabled="thinking || uploadBusy"
+                @picked="uploadAndAttach"
               />
               <div class="composer-input-col">
                 <textarea
@@ -697,6 +727,22 @@ async function send() {
                   @keydown="onKeydown"
                 />
                 <p v-if="uploadHint" class="composer-feedback warn">{{ uploadHint }}</p>
+                <div v-else-if="uploadItems.length" class="upload-queue" aria-live="polite">
+                  <div class="upload-queue-head">{{ t('upload.uploading') }}</div>
+                  <div v-for="u in uploadItems" :key="u.id" class="upload-row">
+                    <div class="upload-name" :title="u.name">{{ u.name }}</div>
+                    <div
+                      class="upload-bar"
+                      role="progressbar"
+                      :aria-valuenow="u.progress"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                    >
+                      <div class="upload-bar-fill" :style="{ width: `${u.progress}%` }" />
+                    </div>
+                    <div class="upload-pct">{{ u.status === 'done' ? '100%' : `${u.progress}%` }}</div>
+                  </div>
+                </div>
                 <p v-else-if="vision && imageUrls.length" class="composer-feedback composer-hint">
                   {{ t('chat.prompt_optional_hint') }}
                 </p>
@@ -1078,6 +1124,52 @@ async function send() {
 }
 .composer-feedback.warn {
   color: var(--danger);
+}
+.upload-queue {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+}
+.upload-queue-head {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.upload-row {
+  display: grid;
+  grid-template-columns: 1fr 140px auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.upload-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.upload-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  overflow: hidden;
+}
+.upload-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  width: 0%;
+  transition: width 0.12s ease;
+}
+.upload-pct {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
 }
 .preview-strip {
   flex-shrink: 0;
