@@ -14,10 +14,15 @@ export async function verifyAppUserCredentials(
   username: string,
   password: string
 ): Promise<boolean> {
-  const row = await db
-    .prepare('SELECT password_hash FROM app_users WHERE username = ? LIMIT 1')
-    .bind(username)
-    .first<{ password_hash: string }>()
-  if (!row?.password_hash) return false
-  return verifyPassword(password, row.password_hash)
+  try {
+    const row = await db
+      .prepare('SELECT password_hash FROM app_users WHERE username = ? LIMIT 1')
+      .bind(username)
+      .first<{ password_hash: string }>()
+    if (!row?.password_hash) return false
+    return verifyPassword(password, row.password_hash)
+  } catch {
+    // Missing migration, D1 offline, etc. — fall back to optional env login in index.
+    return false
+  }
 }

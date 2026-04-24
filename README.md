@@ -131,7 +131,9 @@ npm run build
 | Variable | Where | Description |
 |----------|-------|-------------|
 | `SESSION_SECRET` | `[vars]` locally / `wrangler secret put` in prod | JWT signing key |
-| *(logins)* | D1 table `app_users` | Usernames and PBKDF2 password hashes; provision with `npm run user:add` (see Cloudflare setup above) |
+| `AUTH_USERNAME` / `AUTH_PASSWORD` | `[vars]` or secrets (optional) | Fallback login only if D1 does not accept that pair (recovery / legacy). Remove in production once all users exist in `app_users`. |
+| `CORS_ORIGINS` | `[vars]` (optional) | Comma-separated extra browser `Origin` values allowed with cookies (production domain is built in; add more if needed). |
+| *(logins)* | D1 table `app_users` | Primary logins: PBKDF2 password hashes; provision with `npm run user:add` (see Cloudflare setup above) |
 | `CLOUDFLARE_ACCOUNT_ID` | `.env` (ingest script only) | Account ID for REST calls |
 | `CLOUDFLARE_API_TOKEN` | `.env` (ingest script only) | Token with AI + Vectorize permissions |
 | `OPENROUTER_API_KEY` | `wrangler secret put` / `.dev.vars` | [OpenRouter](https://openrouter.ai/) API key for chat |

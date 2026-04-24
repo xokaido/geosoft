@@ -6,6 +6,7 @@ import {
   setSessionCookie,
   signSession,
 } from './auth'
+import { resolveCorsOrigin } from './cors-origins'
 import { normalizeLoginUsername, verifyAppUserCredentials } from './user-auth'
 import { handleChat } from './chat'
 import {
@@ -25,7 +26,7 @@ const app = new Hono<{ Bindings: Env }>()
 app.use(
   '*',
   cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: (origin, c) => resolveCorsOrigin(c.env, origin),
     allowHeaders: ['Content-Type', 'Authorization'],
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
@@ -41,10 +42,24 @@ app.post('/api/login', async (c) => {
   }
   const username = normalizeLoginUsername(body.username)
   const password = typeof body.password === 'string' ? body.password : ''
-  if (!username || password.length < 8) {
+  if (!username || password.length === 0) {
     return c.json({ error: 'Invalid username or password' }, 401)
   }
-  const ok = await verifyAppUserCredentials(c.env.DB, username, password)
+  let ok = await verifyAppUserCredentials(c.env.DB, username, password)
+  if (!ok) {
+    const lu = c.env.AUTH_USERNAME
+    const lp = c.env.AUTH_PASSWORD
+    if (
+      typeof lu === 'string' &&
+      lu.length > 0 &&
+      typeof lp === 'string' &&
+      lp.length > 0 &&
+      lu === username &&
+      lp === password
+    ) {
+      ok = true
+    }
+  }
   if (!ok) {
     return c.json({ error: 'Invalid username or password' }, 401)
   }

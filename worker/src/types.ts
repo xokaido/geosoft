@@ -5,6 +5,11 @@ export type Env = {
   VECTORIZE: VectorizeIndex
   ASSETS: Fetcher
   SESSION_SECRET: string
+  /** Comma-separated extra `Origin` values (e.g. `https://app.example.com`) for CORS with credentials. */
+  CORS_ORIGINS?: string
+  /** Optional fallback login (same as pre–D1 users). Checked only if D1 credentials do not match. */
+  AUTH_USERNAME?: string
+  AUTH_PASSWORD?: string
   /** Max completion tokens for `/api/chat` (string from wrangler vars). */
   MAX_CHAT_OUTPUT_TOKENS?: string
   /** OpenRouter API key (`wrangler secret put OPENROUTER_API_KEY`). */

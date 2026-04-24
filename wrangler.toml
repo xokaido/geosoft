@@ -45,5 +45,9 @@ MAX_CHAT_OUTPUT_TOKENS = "131072"
 OPENROUTER_HTTP_REFERER = "http://localhost:5173"
 OPENROUTER_APP_TITLE = "GeoSoft AI Chat"
 
-# Logins are rows in D1 `app_users` (see README). For production, set SESSION_SECRET via `wrangler secret put`.
+# D1 `app_users` for normal logins (see README). Optional fallback if D1 row missing / wrong: same creds as before multi-user.
+AUTH_USERNAME = "admin"
+AUTH_PASSWORD = "changeme"
+
+# For production, set SESSION_SECRET via `wrangler secret put`.
 SESSION_SECRET = "dev-only-change-me-use-wrangler-secret-in-prod"
