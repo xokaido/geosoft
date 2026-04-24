@@ -44,7 +44,9 @@ All Wrangler commands run from the **repository root** (`wrangler.toml` is at th
    npm run user:add -- company_a 'their-secure-password'
    ```
 
-   Run the printed `wrangler d1 execute …` command against **local** or **remote** D1. Each username gets its own chat history (`chats.user_id`). Repeat for every company user.
+   The script writes `scripts/.last-app-user-insert.sql` and prints `wrangler d1 execute … --file=…`. **Always use `--file`**, not `--command=…` in the shell: hashes contain `$`, and bash/zsh expand `$100000` inside double quotes and corrupt the row so login never matches.
+
+   Run the printed command against **local** or **remote** D1. Each username gets its own chat history (`chats.user_id`). To fix a broken user row, run `user:add` again for the same username (SQL uses `INSERT OR REPLACE`).
 
 ---
 
@@ -65,7 +67,7 @@ npm run dev
 - Frontend: http://localhost:5173 (proxies `/api` → http://127.0.0.1:8787)
 - Worker: http://127.0.0.1:8787
 
-After `d1 migrations apply --local`, create at least one user with `npm run user:add -- <username> '<password>'` and run the printed SQL against the local database, then sign in with that username and password.
+After `d1 migrations apply --local`, create at least one user with `npm run user:add -- <username> '<password>'`, run the printed `--file=…` command for **local** D1, then sign in with that username and password.
 
 ---
 

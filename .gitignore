@@ -8,3 +8,4 @@ worker/public/
 .wrangler/
 *.log
 dev-dist/
+scripts/.last-app-user-insert.sql
