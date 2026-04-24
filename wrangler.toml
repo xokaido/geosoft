@@ -38,6 +38,11 @@ binding = "ASSETS"
 [vars]
 # Workers AI caps this per model; high values request as much output as the model allows.
 MAX_CHAT_OUTPUT_TOKENS = "131072"
+# Batched vision: OpenRouter (and upstream) often cannot reliably serve 8–12 image URLs in one call.
+# Each batch runs a smaller sub-request, then a final text-only answer uses all notes.
+VISION_IMAGES_PER_UPSTREAM_CALL = "3"
+# Hard cap for images per /api/chat request (app UI should match).
+MAX_CHAT_IMAGES = "12"
 
 # OpenRouter (https://openrouter.ai/docs) — chat uses OpenRouter; RAG embeddings still use Workers AI.
 # Required secret: wrangler secret put OPENROUTER_API_KEY

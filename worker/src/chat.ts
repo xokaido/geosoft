@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { finalizeExchange, insertUserMessage, verifyChatForUser } from './chats'
 import { getModelMeta, isChatModel, isVisionModel } from './models'
-import { openRouterChatStream } from './openrouter'
+import { mapOpenRouterFailure, openRouterChatStream } from './openrouter'
 import { geosoftAssistantFallbackContext } from './geosoft-overview'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
@@ -12,6 +12,13 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 131_072
 const ABSOLUTE_MAX_OUTPUT_TOKENS = 200_000
 const DEFAULT_MAX_ASSISTANT_CHARS = 200_000
 const ABSOLUTE_MAX_ASSISTANT_CHARS = 1_000_000
+const DEFAULT_MAX_CHAT_IMAGES = 12
+const ABSOLUTE_MAX_CHAT_IMAGES = 24
+const DEFAULT_VISION_IMAGES_PER_CALL = 3
+const ABSOLUTE_MAX_VISION_IMAGES_PER_CALL = 8
+/** Max tokens per batched vision sub-request (short notes only). */
+const VISION_BATCH_MAX_TOKENS = 4096
+const BATCH_NOTES_ACCUM_MAX = 96_000
 
 function maxChatOutputTokens(env: Env): number {
   const raw = env.MAX_CHAT_OUTPUT_TOKENS
@@ -29,6 +36,22 @@ function maxAssistantChars(env: Env): number {
   const n = Number.parseInt(String(raw).trim(), 10)
   if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_ASSISTANT_CHARS
   return Math.min(Math.floor(n), ABSOLUTE_MAX_ASSISTANT_CHARS)
+}
+
+function maxChatImages(env: Env): number {
+  const raw = env.MAX_CHAT_IMAGES
+  if (raw === undefined || raw === '') return DEFAULT_MAX_CHAT_IMAGES
+  const n = Number.parseInt(String(raw).trim(), 10)
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_CHAT_IMAGES
+  return Math.min(Math.floor(n), ABSOLUTE_MAX_CHAT_IMAGES)
+}
+
+function visionImagesPerUpstreamCall(env: Env): number {
+  const raw = env.VISION_IMAGES_PER_UPSTREAM_CALL
+  if (raw === undefined || raw === '') return DEFAULT_VISION_IMAGES_PER_CALL
+  const n = Number.parseInt(String(raw).trim(), 10)
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_VISION_IMAGES_PER_CALL
+  return Math.min(Math.floor(n), ABSOLUTE_MAX_VISION_IMAGES_PER_CALL)
 }
 
 function lastUserQuery(messages: ChatMessage[]): string {
@@ -69,6 +92,54 @@ function buildUserContent(text: string, imageDataUrls: string[]): string | unkno
     parts.push({ type: 'image_url', image_url: { url } })
   }
   return parts
+}
+
+function withSynthesisInsteadOfImages(msgs: ChatMessage[], text: string): ChatMessage[] {
+  const out: ChatMessage[] = [...msgs]
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (out[i].role === 'user' && Array.isArray(out[i].content)) {
+      out[i] = { role: 'user', content: text }
+      return out
+    }
+  }
+  return [...msgs, { role: 'user', content: text }]
+}
+
+function buildVisionSynthesisUserContent(
+  userText: string,
+  parts: string[],
+  imageCount: number
+): string {
+  const q = userText.trim()
+  const head = q
+    ? `User request:\n${q}\n\n`
+    : `The user sent ${imageCount} images without additional text. Infer their goal and answer from the notes below.\n\n`
+  return (
+    head +
+    '---\n' +
+    `Structured notes from ${imageCount} image(s), produced in ${parts.length} analysis step(s):\n\n` +
+    parts.map((p, i) => `Step ${i + 1}:\n${p}`).join('\n\n')
+  )
+}
+
+async function jsonResponseForOpenRouterFailure(
+  c: Context<{ Bindings: Env }>,
+  upstream: Response
+): Promise<Response | null> {
+  if (upstream.ok) return null
+  const detail = await upstream.text().catch(() => '')
+  const s = upstream.status
+  const mapped = mapOpenRouterFailure(s, detail)
+  const payload = { error: mapped.error, errorKey: mapped.errorKey }
+  if (s === 401) return c.json(payload, 401)
+  if (s === 403) return c.json(payload, 403)
+  if (s === 402) return c.json(payload, 402)
+  if (s === 429) return c.json(payload, 429)
+  if (s === 408) return c.json(payload, 408)
+  if (s === 400) return c.json(payload, 400)
+  if (s === 502) return c.json(payload, 502)
+  if (s === 503) return c.json(payload, 503)
+  return c.json(payload, 502)
 }
 
 /** Workers AI SSE is line-oriented (`data: {...}\\n`). `response` is often cumulative, not a per-chunk delta. */
@@ -293,8 +364,9 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   } else if (body.imageUrl && typeof body.imageUrl === 'string' && body.imageUrl.trim()) {
     rawUrls.push(body.imageUrl.trim())
   }
-  if (rawUrls.length > 12) {
-    return c.json({ error: 'Too many images (max 12)' }, 400)
+  const maxImgs = maxChatImages(c.env)
+  if (rawUrls.length > maxImgs) {
+    return c.json({ error: `Too many images (max ${maxImgs})` }, 400)
   }
   const imageDataUrls: string[] = []
   if (rawUrls.length) {
@@ -371,22 +443,68 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
   }
 
   try {
+    const perCall = visionImagesPerUpstreamCall(c.env)
+    let messagesForUpstream: ChatMessage[] = outMessages
+
+    if (imageDataUrls.length > perCall) {
+      const total = imageDataUrls.length
+      const nBatches = Math.ceil(total / perCall)
+      const notes: string[] = []
+      const batchOutCap = Math.min(VISION_BATCH_MAX_TOKENS, maxChatOutputTokens(c.env))
+
+      for (let b = 0; b < nBatches; b++) {
+        const from = b * perCall
+        const slice = imageDataUrls.slice(from, from + perCall)
+        const fromN = from + 1
+        const toN = from + slice.length
+        const safeQ = (userTextForDb || '(no text; images only)').replace(/"/g, "'")
+        const instr =
+          `You are processing part of a ${total}-image request. ` +
+          `This is batch ${b + 1} of ${nBatches} (images ${fromN}–${toN} of ${total}). ` +
+          `User message (for context; must not be used to invent image contents): "${safeQ}". ` +
+          `For each image in order, give a short factual description (2–4 sentences) of what is visible. ` +
+          `Begin each block with a line "Image N:" where N is the global index (${fromN}…${toN}). ` +
+          `If the user message is in a non-English language, write these descriptions in that language when possible.`
+
+        const batchMessages: ChatMessage[] = [
+          {
+            role: 'system',
+            content:
+              'You are a vision assistant. You only see part of a larger set of user images. Describe what is actually visible. If something is illegible, say so briefly. Do not refuse the task — answer from pixels.',
+          },
+          { role: 'user', content: buildUserContent(instr, slice) },
+        ]
+
+        const batchUp = await openRouterChatStream(c.env, apiKey, {
+          model,
+          messages: batchMessages,
+          stream: true,
+          max_tokens: batchOutCap,
+        })
+        const batchErr = await jsonResponseForOpenRouterFailure(c, batchUp)
+        if (batchErr) return batchErr
+        if (!batchUp.body) {
+          return c.json(
+            { error: 'OpenRouter returned an empty response body', errorKey: 'openrouter_generic' },
+            502
+          )
+        }
+        const note = await accumulateWorkersAiText(batchUp.body, BATCH_NOTES_ACCUM_MAX)
+        notes.push(note)
+      }
+
+      const synthesis = buildVisionSynthesisUserContent(userTextForDb, notes, total)
+      messagesForUpstream = withSynthesisInsteadOfImages(outMessages, synthesis)
+    }
+
     const upstream = await openRouterChatStream(c.env, apiKey, {
       model,
-      messages: outMessages,
+      messages: messagesForUpstream,
       stream: true,
       max_tokens: maxChatOutputTokens(c.env),
     })
-    if (!upstream.ok) {
-      const detail = await upstream.text().catch(() => '')
-      const msg = `OpenRouter error (${upstream.status}): ${detail.slice(0, 1500)}`
-      const s = upstream.status
-      if (s === 401) return c.json({ error: msg }, 401)
-      if (s === 403) return c.json({ error: msg }, 403)
-      if (s === 429) return c.json({ error: msg }, 429)
-      if (s === 400) return c.json({ error: msg }, 400)
-      return c.json({ error: msg }, 502)
-    }
+    const preStreamErr = await jsonResponseForOpenRouterFailure(c, upstream)
+    if (preStreamErr) return preStreamErr
     const raw = upstream.body
     if (!raw) {
       return c.json({ error: 'OpenRouter returned an empty response body' }, 502)

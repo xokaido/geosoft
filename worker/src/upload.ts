@@ -4,7 +4,8 @@ import { SignJWT, jwtVerify } from 'jose'
 
 const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 const MAX_BYTES = 10 * 1024 * 1024
-const SIGNED_IMAGE_MAX_AGE_S = 60 * 10
+// Multi-batch vision can take several minutes; keep URLs valid for the full worker request.
+const SIGNED_IMAGE_MAX_AGE_S = 60 * 45
 
 const extByMime: Record<string, string> = {
   'image/jpeg': 'jpg',

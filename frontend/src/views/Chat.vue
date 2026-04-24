@@ -490,8 +490,12 @@ async function send() {
       body: JSON.stringify(body),
     })
     if (!r.ok) {
-      const j = await r.json().catch(() => ({}))
-      throw new Error((j as { error?: string }).error || 'chat_failed')
+      const j = (await r.json().catch(() => ({}))) as { error?: string; errorKey?: string }
+      const i18nPath = j.errorKey ? `chat.${j.errorKey}` : ''
+      const translated = i18nPath ? t(i18nPath) : ''
+      const hint =
+        i18nPath && translated !== i18nPath ? translated : (j.error?.trim() || t('chat.error'))
+      throw { __uploadHint: hint }
     }
     if (!r.body) throw new Error('no_body')
 
@@ -525,17 +529,21 @@ async function send() {
     thread.value.push({ role: 'user', content: outboundText })
     thread.value.push({ role: 'assistant', content: full })
     void loadChats()
-  } catch {
+  } catch (e) {
     thinking.value = false
     clearUploadedImages = false
     const idx = uiMessages.value.findIndex((m) => m.id === userMsg.id)
     if (idx >= 0) uiMessages.value.splice(idx, 1)
     draft.value = text
     imageUrls.value = savedImageUrls
-    uploadHint.value = t('chat.error')
+    const hintFromApi =
+      e && typeof e === 'object' && e !== null && '__uploadHint' in e
+        ? String((e as { __uploadHint: string }).__uploadHint)
+        : null
+    uploadHint.value = hintFromApi?.trim() ? hintFromApi : t('chat.error')
     setTimeout(() => {
       uploadHint.value = ''
-    }, 4500)
+    }, 8000)
   } finally {
     thinking.value = false
     if (clearUploadedImages) imageUrls.value = []

@@ -14,6 +14,17 @@ export type Env = {
   MAX_CHAT_OUTPUT_TOKENS?: string
   /** Max assistant characters stored in D1 for `/api/chat` (string from wrangler vars). */
   MAX_ASSISTANT_CHARS?: string
+  /**
+   * Max OpenRouter `image_url` items per sub-request when many images are attached.
+   * The worker runs a batched pre-analysis, then a text-only final turn (RAG + language rules still apply there).
+   * @default 3
+   */
+  VISION_IMAGES_PER_UPSTREAM_CALL?: string
+  /**
+   * Max number of /api/image attachments in one chat turn.
+   * @default 12
+   */
+  MAX_CHAT_IMAGES?: string
   /** OpenRouter API key (`wrangler secret put OPENROUTER_API_KEY`). */
   OPENROUTER_API_KEY?: string
   /** Optional site URL for OpenRouter app attribution (`HTTP-Referer`). */
