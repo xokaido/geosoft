@@ -126,15 +126,24 @@ function isHeadingLine(t: string): boolean {
 
 const LOOSE_METRIC_COLON = /^(.+?)\s*[:：]\s*(.+?)\s*$/i
 /** Matches "label 7/10" / "label N/A" / "**label** 7/10" without a colon. */
-const LOOSE_METRIC_NOCOLON = /^(.+?)\s+(\d{1,2}\s*\/\s*10|N\/?A(?:\s*\([^)]*\))?)\s*\*{0,2}\s*$/i
+const LOOSE_METRIC_NOCOLON =
+  /^(.+?)\s+(\d{1,2}\s*\/\s*10(?:\s*\([^)]*\))?|N\/?A(?:\s*\([^)]*\))?|Unknown(?:\s*\([^)]*\))?|უცნობია?(?:\s*\([^)]*\))?)\s*\*{0,2}\s*$/iu
 
 const SCORE_LABEL_RE =
-  /exterior|interior|engine|mechanical|condition|ratings?|damage|score|გარე|შიდა|ძრავ|მდგომ|ცვეთ|რეიტინგ|оценк|внешн|внутрен|двигат|состоян/i
+  /exterior|interior|engine|mechanical|condition|ratings?|damage|score|გარე|შიდა|ძრავ|ექსტერი|ინტერი|ექსტერიერი|ინტერიერი|მექანიკ|მდგომ|ცვეთ|რეიტინგ|оценк|внешн|внутрен|двигат|состоян/i
+
+function isUnknownScore(v: string): boolean {
+  const t = v.trim()
+  if (/N\/?A/i.test(t)) return true
+  if (/\bunknown\b/i.test(t)) return true
+  if (/უცნობია?|გაურკვეველი/i.test(t)) return true
+  return false
+}
 
 function isScoreValue(v: string): boolean {
   const t = v.trim()
-  if (/N\/?A/i.test(t)) return true
-  if (/^\*{0,2}\s*\d{1,2}\s*\/\s*10\s*\*{0,2}$/.test(t)) return true
+  if (isUnknownScore(t)) return true
+  if (/^\*{0,2}\s*\d{1,2}\s*\/\s*10/.test(t)) return true
   if (/^\*{0,2}\s*(10|[0-9])\s*\*{0,2}$/.test(t)) return true
   return false
 }
@@ -171,7 +180,10 @@ function splitValueAndNote(value: string): { pill: string; note: string } {
 }
 
 function formatMetricBlock(line: string): string {
-  const cleaned = stripLeadingListMarker(line).trim()
+  let cleaned = stripLeadingListMarker(line).trim()
+  if (!cleaned) return ''
+  // Markdown like "(Exterior):** 4/10" breaks a naive "first colon" split; normalize.
+  cleaned = cleaned.replace(/\)\s*:\s*\*+(?=\s*\d)/g, '): ').replace(/:\s*\*+\s*(?=\d)/g, ': ')
   if (!cleaned) return ''
 
   let name = ''
@@ -190,10 +202,10 @@ function formatMetricBlock(line: string): string {
 
   const nameClean = name.replace(/^\*+/, '').replace(/\*+$/, '').trim()
   if (!isScoreValue(valuePart)) return ''
-  if (!/N\/?A/i.test(valuePart) && !SCORE_LABEL_RE.test(nameClean)) return ''
+  if (!/N\/?A/i.test(valuePart) && !isUnknownScore(valuePart) && !SCORE_LABEL_RE.test(nameClean)) return ''
 
   const { pill: pillRaw, note } = splitValueAndNote(valuePart)
-  const na = /N\/?A/i.test(pillRaw)
+  const na = isUnknownScore(pillRaw) || /N\/?A/i.test(pillRaw)
   let num = 0
   if (!na) {
     const s10 = pillRaw.match(/^(\d{1,2})\s*\/\s*10$/)
