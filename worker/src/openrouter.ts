@@ -111,3 +111,15 @@ export async function openRouterChatStream(
     body: JSON.stringify(body),
   })
 }
+
+export async function openRouterChatJson(
+  env: Env,
+  apiKey: string,
+  body: Record<string, unknown>
+): Promise<Response> {
+  return fetch(OPENROUTER_CHAT_URL, {
+    method: 'POST',
+    headers: openRouterRequestHeaders(env, apiKey),
+    body: JSON.stringify({ ...body, stream: false }),
+  })
+}

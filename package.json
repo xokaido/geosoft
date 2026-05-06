@@ -12,6 +12,8 @@
     "ingest": "npx tsx scripts/ingest-geosoft.ts",
     "models:sync": "npx tsx scripts/generate-workers-ai-models.ts",
     "user:add": "npx tsx scripts/add-app-user.ts",
+    "test:vehicle-report": "tsx scripts/test-vehicle-report.ts",
+    "typecheck:worker": "tsc -p worker/tsconfig.json --noEmit",
     "typecheck": "vue-tsc -p frontend/tsconfig.json --noEmit"
   },
   "dependencies": {

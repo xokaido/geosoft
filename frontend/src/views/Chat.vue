@@ -11,6 +11,7 @@ import {
   uploadChatImageFilesWithProgress,
   type UploadProgressUpdate,
 } from '../lib/chat-image-upload'
+import type { VehicleInspectionReport } from '../lib/vehicle-report'
 import { useI18n } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
@@ -141,6 +142,7 @@ async function loadMessages(chatId: string) {
       role: 'user' | 'assistant'
       content: string
       modelName?: string | null
+      structuredReport?: VehicleInspectionReport
       imageUrls?: string[]
     }>
   }
@@ -152,6 +154,7 @@ async function loadMessages(chatId: string) {
     role: m.role,
     content: m.content,
     modelName: m.modelName ?? undefined,
+    structuredReport: m.structuredReport,
     imageUrls: m.imageUrls?.length ? [...m.imageUrls] : undefined,
   }))
 }
@@ -440,6 +443,7 @@ async function readTokenStream(resp: Response, onToken: (t: string) => void) {
 async function send() {
   const text = draft.value.trim()
   const hasImages = vision.value && imageUrls.value.length > 0
+  const vehicleReportMode = hasImages
   if ((!text && !hasImages) || !modelId.value) return
   const outboundText = text
   const savedImageUrls = [...imageUrls.value]
@@ -479,6 +483,9 @@ async function send() {
   if (imageUrls.value.length && vision.value) {
     body.imageUrls = [...imageUrls.value]
   }
+  if (vehicleReportMode) {
+    body.responseMode = 'vehicleInspectionReport'
+  }
 
   let assistantId: string | null = null
   let full = ''
@@ -496,6 +503,33 @@ async function send() {
       const hint =
         i18nPath && translated !== i18nPath ? translated : (j.error?.trim() || t('chat.error'))
       throw { __uploadHint: hint }
+    }
+    const contentType = r.headers.get('Content-Type') || ''
+    if (contentType.includes('application/json')) {
+      const j = (await r.json()) as {
+        message?: {
+          id?: string
+          role?: 'assistant'
+          content?: string
+          modelName?: string
+          structuredReport?: VehicleInspectionReport
+        }
+        report?: VehicleInspectionReport
+      }
+      const report = j.report ?? j.message?.structuredReport
+      if (!j.message?.id || !report) throw new Error('invalid_report_response')
+      uiMessages.value.push({
+        id: j.message.id,
+        role: 'assistant',
+        content: j.message.content ?? '',
+        modelName: j.message.modelName ?? modelName,
+        structuredReport: report,
+      })
+      thread.value.push({ role: 'user', content: outboundText })
+      thread.value.push({ role: 'assistant', content: j.message.content ?? '' })
+      thinking.value = false
+      void loadChats()
+      return
     }
     if (!r.body) throw new Error('no_body')
 

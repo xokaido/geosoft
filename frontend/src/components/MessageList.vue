@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import VehicleInspectionReport from './VehicleInspectionReport.vue'
 import { formatAssistantMessageHtml, isVehicleReportText } from '../lib/carReportHtml'
+import type { VehicleInspectionReport as VehicleInspectionReportData } from '../lib/vehicle-report'
 import { useI18n } from '../i18n'
 
 export type UiMsg = {
@@ -8,6 +10,7 @@ export type UiMsg = {
   role: 'user' | 'assistant'
   content: string
   modelName?: string
+  structuredReport?: VehicleInspectionReportData
   /** Image shown in-thread (e.g. `/api/image/...`); retained after send. */
   imageUrl?: string | null
   /** Multiple images for one user turn */
@@ -130,8 +133,12 @@ function userThumbs(m: UiMsg): string[] {
             <img :src="src" class="thumb" alt="" />
           </button>
         </div>
+        <VehicleInspectionReport
+          v-if="m.role === 'assistant' && m.structuredReport"
+          :report="m.structuredReport"
+        />
         <div
-          v-if="m.role === 'assistant'"
+          v-else-if="m.role === 'assistant'"
           class="text md"
           :class="{ 'md--report': isVehicleReportText(m.content) }"
           v-html="assistantMessageHtml(m.content)"

@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import { isChatModel } from './models'
 import type { Env } from './types'
+import type { VehicleInspectionReport } from './vehicle-report'
 
 type ChatListItem = {
   id: string
@@ -16,6 +17,7 @@ type ChatMessageApiRow = {
   content: string
   modelName: string | null
   imageUrlsJson: string | null
+  structuredReportJson: string | null
   createdAt: number
 }
 
@@ -26,6 +28,16 @@ function parseStoredImageUrls(raw: string | null): string[] | undefined {
     if (!Array.isArray(v)) return undefined
     const urls = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
     return urls.length ? urls : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function parseStoredStructuredReport(raw: string | null): VehicleInspectionReport | undefined {
+  if (!raw || !String(raw).trim()) return undefined
+  try {
+    const v = JSON.parse(String(raw)) as VehicleInspectionReport
+    return v && typeof v === 'object' ? v : undefined
   } catch {
     return undefined
   }
@@ -114,7 +126,7 @@ export async function handleGetChatMessages(c: Context<{ Bindings: Env }>): Prom
     return c.json({ error: 'Chat not found' }, 404)
   }
   const { results } = await c.env.DB.prepare(
-    `SELECT id, role, content, model_name AS modelName, image_urls AS imageUrlsJson, created_at AS createdAt
+    `SELECT id, role, content, model_name AS modelName, image_urls AS imageUrlsJson, structured_report AS structuredReportJson, created_at AS createdAt
      FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC, id ASC`
   )
     .bind(chatId)
@@ -123,12 +135,14 @@ export async function handleGetChatMessages(c: Context<{ Bindings: Env }>): Prom
   return c.json({
     messages: rows.map((r) => {
       const imageUrls = parseStoredImageUrls(r.imageUrlsJson)
+      const structuredReport = parseStoredStructuredReport(r.structuredReportJson)
       return {
         id: r.id,
         role: r.role,
         content: r.content,
         modelName: r.modelName,
         ...(imageUrls ? { imageUrls } : {}),
+        ...(structuredReport ? { structuredReport } : {}),
         createdAt: r.createdAt,
       }
     }),
@@ -200,6 +214,7 @@ export async function finalizeExchange(
     assistantContent: string
     modelName: string
     userPreviewForTitle: string
+    structuredReport?: VehicleInspectionReport
     now: number
   }
 ): Promise<void> {
@@ -207,13 +222,14 @@ export async function finalizeExchange(
   await db.batch([
     db
       .prepare(
-        `INSERT INTO chat_messages (id, chat_id, role, content, model_name, image_urls, created_at) VALUES (?, ?, 'assistant', ?, ?, NULL, ?)`
+        `INSERT INTO chat_messages (id, chat_id, role, content, model_name, image_urls, structured_report, created_at) VALUES (?, ?, 'assistant', ?, ?, NULL, ?, ?)`
       )
       .bind(
         params.assistantMessageId,
         params.chatId,
         params.assistantContent,
         params.modelName,
+        params.structuredReport ? JSON.stringify(params.structuredReport) : null,
         params.now
       ),
     db

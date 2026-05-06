@@ -1,12 +1,18 @@
 import type { Context } from 'hono'
 import { finalizeExchange, insertUserMessage, verifyChatForUser } from './chats'
 import { getModelMeta, isChatModel, isVisionModel } from './models'
-import { mapOpenRouterFailure, openRouterChatStream } from './openrouter'
+import { mapOpenRouterFailure, openRouterChatJson, openRouterChatStream } from './openrouter'
 import { geosoftAssistantFallbackContext } from './geosoft-overview'
 import { retrieveRagContext } from './rag'
 import type { Env } from './types'
 import bundledChatSystemPrompt from './prompts/chat-system.md'
 import { signImageToken } from './upload'
+import {
+  buildVehicleReportPrompt,
+  extractVehicleReportJson,
+  normalizeVehicleInspectionReport,
+  summarizeVehicleReport,
+} from './vehicle-report'
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 131_072
 const ABSOLUTE_MAX_OUTPUT_TOKENS = 200_000
@@ -359,6 +365,7 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     chatId?: string
     /** ka | ru | en — app language switcher; drives assistant reply language */
     uiLanguage?: string
+    responseMode?: 'vehicleInspectionReport'
   }
   try {
     body = await c.req.json()
@@ -383,8 +390,9 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     return c.json({ error: 'messages required' }, 400)
   }
 
+  const vehicleReportMode = body.responseMode === 'vehicleInspectionReport'
   let ragBlock = ''
-  if (body.useRag) {
+  if (body.useRag && !vehicleReportMode) {
     try {
       const q = lastUserQuery(messages)
       if (q) {
@@ -396,7 +404,7 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     }
   }
 
-  const ragOn = !!body.useRag
+  const ragOn = !!body.useRag && !vehicleReportMode
   const hasRagContext = ragBlock.trim().length > 0
   const uiLang = parseUiLanguage(body.uiLanguage)
 
@@ -547,6 +555,73 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
       messagesForUpstream = withSynthesisInsteadOfImages(outMessages, synthesis)
     }
 
+    const userMsgId = crypto.randomUUID()
+    const userNow = Date.now()
+    const userImageUrlsJson = rawUrls.length > 0 ? JSON.stringify(rawUrls) : null
+    const meta = getModelMeta(model)
+    const assistantModelName = meta?.name ?? meta?.slug ?? model
+    const assistantMsgId = crypto.randomUUID()
+
+    if (vehicleReportMode) {
+      if (!vision) {
+        return c.json({ error: 'Vehicle inspection reports require a vision-capable model' }, 400)
+      }
+      if (!imageDataUrls.length) {
+        return c.json({ error: 'Vehicle inspection reports require at least one vehicle image' }, 400)
+      }
+
+      const reportMessages: ChatMessage[] = [
+        { role: 'system', content: buildVehicleReportPrompt(uiLang) },
+        ...messagesForUpstream.filter((m) => m.role !== 'system'),
+      ]
+
+      const upstreamJson = await openRouterChatJson(c.env, apiKey, {
+        model,
+        messages: reportMessages,
+        max_tokens: Math.min(maxChatOutputTokens(c.env), 16_384),
+        response_format: { type: 'json_object' },
+      })
+      const reportErr = await jsonResponseForOpenRouterFailure(c, upstreamJson)
+      if (reportErr) return reportErr
+
+      const payload = (await upstreamJson.json().catch(() => null)) as {
+        choices?: Array<{ message?: { content?: string } }>
+      } | null
+      const reportText = payload?.choices?.[0]?.message?.content
+      if (!reportText) {
+        return c.json({ error: 'OpenRouter returned an empty vehicle report', errorKey: 'openrouter_generic' }, 502)
+      }
+
+      let report: ReturnType<typeof normalizeVehicleInspectionReport>
+      try {
+        report = normalizeVehicleInspectionReport(extractVehicleReportJson(reportText))
+      } catch {
+        return c.json({ error: 'OpenRouter returned an invalid vehicle report', errorKey: 'openrouter_generic' }, 502)
+      }
+      const assistantContent = summarizeVehicleReport(report, uiLang)
+      await insertUserMessage(c.env.DB, chatId, userMsgId, userTextForDb, userNow, userImageUrlsJson)
+      await finalizeExchange(c.env.DB, {
+        chatId,
+        assistantMessageId: assistantMsgId,
+        assistantContent,
+        modelName: assistantModelName,
+        structuredReport: report,
+        userPreviewForTitle: userTextForDb,
+        now: Date.now(),
+      })
+
+      return c.json({
+        message: {
+          id: assistantMsgId,
+          role: 'assistant',
+          content: assistantContent,
+          modelName: assistantModelName,
+          structuredReport: report,
+        },
+        report,
+      })
+    }
+
     const upstream = await openRouterChatStream(c.env, apiKey, {
       model,
       messages: messagesForUpstream,
@@ -562,14 +637,7 @@ export async function handleChat(c: Context<{ Bindings: Env }>): Promise<Respons
     const [toClient, toRecorder] = raw.tee()
     const out = transformAiSseToTokenSse(toClient)
 
-    const userMsgId = crypto.randomUUID()
-    const userNow = Date.now()
-    const userImageUrlsJson = rawUrls.length > 0 ? JSON.stringify(rawUrls) : null
     await insertUserMessage(c.env.DB, chatId, userMsgId, userTextForDb, userNow, userImageUrlsJson)
-
-    const meta = getModelMeta(model)
-    const assistantModelName = meta?.name ?? meta?.slug ?? model
-    const assistantMsgId = crypto.randomUUID()
 
     const cap = maxAssistantChars(c.env)
     const persist = accumulateWorkersAiText(toRecorder, cap).then((assistantText) =>
