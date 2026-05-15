@@ -48,7 +48,7 @@ MAX_CHAT_IMAGES = "12"
 # Required secret: wrangler secret put OPENROUTER_API_KEY
 # Optional: public URL of your app for OpenRouter rankings (HTTP-Referer)
 OPENROUTER_HTTP_REFERER = "http://localhost:5173"
-OPENROUTER_APP_TITLE = "GeoSoft AI Chat"
+OPENROUTER_APP_TITLE = "Geosoft AI Chat"
 
 # D1 `app_users` for normal logins (see README). Optional fallback if D1 row missing / wrong: same creds as before multi-user.
 AUTH_USERNAME = "admin"
