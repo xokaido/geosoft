@@ -6,6 +6,7 @@ const BUILTIN = [
   'http://127.0.0.1:5173',
   'https://127.0.0.1:5173',
   'https://car.kadri.ge',
+  'https://crystal.kadri.ge',
 ] as const
 
 /** Returns the request Origin if allowed, otherwise null (browser blocks the response). */
