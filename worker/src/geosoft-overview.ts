@@ -23,9 +23,9 @@ const OVERVIEW_KA = `
 `.trim()
 
 const OVERVIEW_EN = `
-GeoSoft (geosoft.ge) is a Georgia-based technology partner helping organizations adopt cloud platforms and a modern digital workplace.
+Geosoft (geosoft.ge) is a Georgia-based technology partner helping organizations adopt cloud platforms and a modern digital workplace.
 
-What GeoSoft works with at a high level:
+What Geosoft works with at a high level:
 • Google Workspace — Gmail, Calendar, Drive, Docs, Sheets, Meet, and collaboration for teams.
 • Google Cloud Platform — cloud infrastructure, analytics, AI/ML tooling, hybrid approaches.
 • Microsoft 365 — Word, Excel, Outlook, PowerPoint, Teams, OneDrive, and secure teamwork.
@@ -36,7 +36,7 @@ What GeoSoft works with at a high level:
 
 Services include: environment assessment, migration planning, cloud configuration, data migration, training, and ongoing support.
 
-For up-to-date offerings and pricing, point people to geosoft.ge or GeoSoft contact channels rather than guessing specifics.
+For up-to-date offerings and pricing, point people to geosoft.ge or Geosoft contact channels rather than guessing specifics.
 `.trim()
 
 /** Extra pages merged into crawl ingest so Vectorize always has product-oriented snippets. */
@@ -44,12 +44,12 @@ export function geosoftOverviewSeedPages(): PageRecord[] {
   return [
     {
       url: 'https://geosoft.ge/__kb__/overview-ka',
-      title: 'GeoSoft — პროდუქტები და სერვისები (შინაარსი)',
+      title: 'Geosoft — პროდუქტები და სერვისები (შინაარსი)',
       text: OVERVIEW_KA,
     },
     {
       url: 'https://geosoft.ge/__kb__/overview-en',
-      title: 'GeoSoft — products and services (summary)',
+      title: 'Geosoft — products and services (summary)',
       text: OVERVIEW_EN,
     },
   ]

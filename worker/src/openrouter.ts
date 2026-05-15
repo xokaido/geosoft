@@ -95,7 +95,7 @@ export function openRouterRequestHeaders(env: Env, apiKey: string): Record<strin
   if (referer) {
     headers['HTTP-Referer'] = referer
   }
-  headers['X-OpenRouter-Title'] = env.OPENROUTER_APP_TITLE?.trim() || 'GeoSoft AI Chat'
+  headers['X-OpenRouter-Title'] = env.OPENROUTER_APP_TITLE?.trim() || 'Geosoft AI Chat'
   return headers
 }
 

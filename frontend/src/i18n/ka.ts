@@ -2,7 +2,7 @@ import type { Messages } from './en'
 
 const messages: Messages = {
   app: {
-    title: 'GeoSoft Cloud ჩეთი',
+    title: 'Geosoft Cloud ჩეთი',
   },
   login: {
     title: 'შესვლა',

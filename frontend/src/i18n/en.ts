@@ -1,6 +1,6 @@
 const messages = {
   app: {
-    title: 'GeoSoft Cloud Chat',
+    title: 'Geosoft Cloud Chat',
   },
   login: {
     title: 'Sign In',
