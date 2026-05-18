@@ -47,7 +47,7 @@ Under each assistant bubble (only when usage data is available):
 - Cost format: `null` → hidden; `0` → `$0.0000`; `0 < n < 0.0001` → `<$0.0001`; else `$X.XXXX` (4 decimals, USD).
 - Token format: `Intl.NumberFormat(locale)` with thousands separator.
 - Latency: `< 1000` ms → `423 ms`; else `1.2 s` (one decimal).
-- The whole line is hidden when `costUsd`, `promptTokens`, and `completionTokens` are all `null` (old rows, failed parses, etc.).
+- The whole line is hidden when `costUsd`, `promptTokens`, and `completionTokens` are all `null` (old rows, failed parses, etc.). `latencyMs` alone does **not** render the line — without a cost or token count to anchor it, latency is uninformative.
 
 Latency is measured on the **frontend** (`performance.now()` at `send()` → `performance.now()` at stream end). Not persisted, not shown on historical messages — only the current-session reply gets a latency value.
 
@@ -298,7 +298,7 @@ No index needed — `SUM(cost_usd)` per chat is bounded by `idx_messages_chat_cr
 
 - **Final chunk has no `usage`** (provider hiccup): `extractUsageFromChunk` returns `null`, columns stay NULL, meta line hides.
 - **Stream canceled by client mid-flight**: recorder finalizes partial text, usage stays `null`. No regression vs. current behavior.
-- **Old chat with non-Google `model_id`**: still loads via `getModelMeta()`. Toggle has no button for that model, so the user is effectively pinned — switching forces a new chat. Acceptable for legacy data.
+- **Old chat with non-Google `model_id`**: not reachable from the sidebar (which filters by the currently active model, and no toggle button exists for the legacy model). The rows remain in D1 — preserved, not deleted — but effectively hidden from the UI. Acceptable per the "keep in code, hide from UI" decision. The legacy `model_id` still resolves in `getModelMeta()` so backend operations on the row don't crash.
 - **BYOK with `cost === 0`**: shows `$0.0000` truthfully. If this becomes visual noise we can hide zero entirely in a follow-up.
 - **Vehicle-report path failure** (non-streaming): if upstream JSON has no `usage`, no usage persisted. Meta line hides on that row.
 
